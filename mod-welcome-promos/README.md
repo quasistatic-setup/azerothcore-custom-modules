@@ -22,6 +22,7 @@ irgendwo eintragen muesste.
 |---|---|---|
 | Serverstart | `OnBeforeWorldInitialized` | legt die Merktabelle an |
 | Charaktererstellung | `OnPlayerCreate` | prueft, verschickt, vermerkt |
+| endgueltige Charakterloeschung | `OnPlayerDeleteFromDB` | entfernt die Versandmarke |
 
 Der Hook wird im Core aufgerufen, nachdem die Charaktererstellung erfolgreich
 festgeschrieben wurde. Der Charakter steht zu diesem Zeitpunkt in der
@@ -36,6 +37,10 @@ auseinanderlaufen; weitere Praefixe lassen sich konfigurieren.
 Zweifach abgesichert: `OnPlayerCreate` feuert je Charakter genau einmal, und
 zusaetzlich wird jeder belieferte Charakter in `mod_welcome_promos_sent`
 vermerkt. Ein erneutes Anmelden erzeugt keine weitere Mail.
+
+Bei einer endgueltigen Charakterloeschung wird die Versandmarke innerhalb
+derselben Datenbanktransaktion entfernt. Falls der Core die freigewordene GUID
+spaeter erneut vergibt, kann der neue Charakter die Mail dadurch erhalten.
 
 ## Verhaeltnis zur Sammleredition
 

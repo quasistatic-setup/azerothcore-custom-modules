@@ -40,7 +40,8 @@ class WelcomePromosPlayerScript : public PlayerScript
 {
 public:
     WelcomePromosPlayerScript() : PlayerScript("WelcomePromosPlayerScript", {
-        PLAYERHOOK_ON_CREATE
+        PLAYERHOOK_ON_CREATE,
+        PLAYERHOOK_ON_DELETE_FROM_DB
     }) { }
 
     // Wird nach dem erfolgreichen Festschreiben der Charaktererstellung
@@ -68,6 +69,14 @@ public:
         MarkDelivered(guid, mails);
         LOG_INFO("module", "[WelcomePromos] {} ({}) hat {} Willkommensmail(s) erhalten.",
                  player->GetName(), guid, mails);
+    }
+
+    // Charakter-GUIDs koennen nach einer endgueltigen Loeschung erneut
+    // vergeben werden. Deshalb muss die Versandmarke in derselben Transaktion
+    // wie der Charakter entfernt werden.
+    void OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 guid) override
+    {
+        trans->Append("DELETE FROM `{}` WHERE guid = {}", SENT_TABLE, guid);
     }
 
 private:
