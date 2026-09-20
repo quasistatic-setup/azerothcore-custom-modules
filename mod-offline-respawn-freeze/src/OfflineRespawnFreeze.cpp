@@ -455,8 +455,9 @@ private:
             ? std::string()
             : Acore::StringFormat(", zuzueglich {} Karenz", HumanDuration(g_cfg.graceSeconds));
 
-        LOG_INFO("module", "[RespawnFreeze] Ausfallzeit {}{}, ergibt {} Verschiebung. {} Eintraege verschoben{}{}.",
+        LOG_INFO("module", "[RespawnFreeze] Ausfallzeit {}{}, ergibt {} Verschiebung. {} Eintraege {}{}{}.",
                  HumanDuration(downtime), grace, HumanDuration(shift), res.shifted,
+                 g_cfg.dryRun ? "waeren betroffen" : "verschoben",
                  SkippedNote(res), g_cfg.includeInstances ? "" : ", offene Welt");
 
         if (g_cfg.dryRun)
@@ -615,14 +616,15 @@ private:
 
         ShiftResult const res = ShiftRespawnTimes(select, absence, true, false);
 
-        LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten verschoben, davon {} auf geladenen Karten{}.",
-                 HumanDuration(absence), res.shifted, res.inMemory, SkippedNote(res));
-
         if (g_cfg.dryRun)
         {
-            LOG_INFO("module", "[RespawnFreeze] Probelauf aktiv: es wird nichts geschrieben.");
+            LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten waeren betroffen{}. Probelauf aktiv: es wird nichts geschrieben.",
+                     HumanDuration(absence), res.shifted, SkippedNote(res));
             return;
         }
+
+        LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten verschoben, davon {} auf geladenen Karten{}.",
+                 HumanDuration(absence), res.shifted, res.inMemory, SkippedNote(res));
 
         Clear(absence, res.shifted);
     }
