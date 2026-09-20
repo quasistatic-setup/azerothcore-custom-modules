@@ -10,6 +10,10 @@
 # weiter. Beim Start werden die noch offenen Zeitpunkte um genau die
 # Ausfallzeit nach hinten verschoben.
 #
+# Zusaetzlich kann die Respawnzeit auch dann ruhen, wenn der Server zwar
+# laeuft, aber kein menschlicher Spieler angemeldet ist. Siehe
+# FreezeWhileNoPlayerOnline.
+#
 # Ausdruecklich nicht betroffen sind GameObjects (Kraeuter, Erz, Truhen),
 # Auktionen, Post, Kalender, saisonale Ereignisse und die Weltzeit. Es wird
 # keine virtuelle Uhr eingefuehrt, sondern ausschliesslich ein Feld der
@@ -34,6 +38,29 @@ OfflineRespawnFreeze.Enable = 1
 OfflineRespawnFreeze.DryRun = 0
 
 #
+#    OfflineRespawnFreeze.FreezeWhileNoPlayerOnline
+#        Beschreibung: Respawnzeit auch dann anhalten, wenn der Server laeuft,
+#                      aber kein menschlicher Spieler angemeldet ist.
+#                      Beim Logout des letzten Menschen wird der offene Bestand
+#                      vermerkt, beim Login des ersten Menschen um genau die
+#                      Abwesenheit verschoben. Botsitzungen zaehlen dabei nicht
+#                      als Spieler (WorldSession::IsBot).
+#                      Was die Bots waehrend der Abwesenheit erlegen, steht
+#                      nicht im Vermerk und respawnt voellig normal. Der Freeze
+#                      betrifft nur den Bestand, den der Mensch hinterlassen
+#                      hat.
+#                      Damit entfaellt auch die pauschale Karenz beim Start:
+#                      Ist beim Herunterfahren ein Anker gesetzt, wird die
+#                      Spanne bis zum Login exakt abgerechnet statt geschaetzt.
+#                      Sinnvoll nur bei einem einzigen menschlichen Spieler
+#                      beziehungsweise einer einzigen Spielergruppe. Es zaehlen
+#                      der letzte Logout und der erste Login.
+#        Vorgabe:      1
+#
+
+OfflineRespawnFreeze.FreezeWhileNoPlayerOnline = 1
+
+#
 #    OfflineRespawnFreeze.HeartbeatSeconds
 #        Beschreibung: Abstand, in dem der Server seinen Zeitstempel fortschreibt.
 #                      Dieser Wert bestimmt die groesstmoegliche Abweichung nach
@@ -56,6 +83,10 @@ OfflineRespawnFreeze.HeartbeatSeconds = 60
 #                      zumal Bots waehrenddessen bereits spielen und toeten.
 #                      300 entspricht fuenf Minuten und deckt den ueblichen
 #                      Anlauf ab. 0 schaltet die Karenz ab.
+#                      Wirkt nur, wenn kein Anker aus einem Logout vorliegt,
+#                      also bei FreezeWhileNoPlayerOnline = 0 oder nach einem
+#                      Absturz waehrend des Spielens. Sonst rechnet der
+#                      Login-Pfad diese Spanne genau ab.
 #        Vorgabe:      300
 #
 
@@ -94,6 +125,24 @@ OfflineRespawnFreeze.MaxDowntimeDays = 60
 #
 
 OfflineRespawnFreeze.MaxFutureDays = 30
+
+#
+#    OfflineRespawnFreeze.MaxSpawnTimeSecs
+#        Beschreibung: Spawns, deren eigene Respawnzeit (creature.spawntimesecs)
+#                      diesen Wert uebersteigt, werden nicht verschoben. Sie
+#                      laufen weiter nach echter Zeit.
+#                      Hintergrund: Der Freeze macht aus Kalenderzeit Spielzeit.
+#                      Bei gewoehnlichen Mobs faellt das nicht auf, ihre
+#                      Respawnzeit liegt meist unter fuenf Minuten. Bei seltenen
+#                      Elite-Spawns mit 8 bis 42 Stunden und bei Event-NPCs
+#                      kehrt sich die Wirkung um: Sie blieben bei wenigen
+#                      Stunden Spiel am Tag ueber Wochen aus, obwohl ihr
+#                      Ereignis nach Kalender laeuft.
+#                      0 schaltet die Ausnahme ab, dann wird alles verschoben.
+#        Vorgabe:      1800
+#
+
+OfflineRespawnFreeze.MaxSpawnTimeSecs = 1800
 
 #
 #    OfflineRespawnFreeze.IncludeInstances

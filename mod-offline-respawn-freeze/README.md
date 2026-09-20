@@ -1,18 +1,47 @@
 # mod-offline-respawn-freeze
 
-Haelt die Respawn-Zeit von Kreaturen an, solange der Server nicht laeuft.
+Haelt die Respawn-Zeit von Kreaturen an, solange niemand spielt.
 
 ## Zweck
 
 `creature_respawn.respawnTime` ist in AzerothCore eine absolute Unix-Zeit. Ein
 Mob, der zehn Minuten bis zum Respawn braucht, erscheint daher auch dann
-wieder, wenn der Server in der Zwischenzeit ausgeschaltet war. Fuer einen
-Server, der nur zeitweise laeuft, ist das unerwuenscht: Die Welt wirkt bei
-jedem Start vollstaendig zurueckgesetzt.
+wieder, wenn in der Zwischenzeit niemand gespielt hat. Fuer einen Server, der
+nur zeitweise laeuft, ist das unerwuenscht: Die Welt wirkt bei jedem Start
+vollstaendig zurueckgesetzt.
 
-Dieses Modul verschiebt beim Start die noch offenen Respawn-Zeitpunkte um
-genau die Ausfallzeit nach hinten. Ein Mob mit sieben verbleibenden Minuten
-hat nach zwanzig Stunden Ausfallzeit weiterhin sieben Minuten vor sich.
+Das Modul gleicht zwei Spannen aus:
+
+1. **Server aus.** Beim Start werden die noch offenen Respawn-Zeitpunkte um
+   genau die Ausfallzeit nach hinten verschoben. Ein Mob mit sieben
+   verbleibenden Minuten hat nach zwanzig Stunden Ausfallzeit weiterhin sieben
+   Minuten vor sich.
+2. **Server laeuft, niemand angemeldet.** Beim Logout des letzten menschlichen
+   Spielers wird der offene Bestand vermerkt, beim Login des ersten Menschen um
+   genau die Abwesenheit verschoben. Diese Spanne deckt ab, dass der Server
+   typischerweise vor dem Einloggen und nach dem Ausloggen noch eine Weile
+   laeuft.
+
+Der zweite Punkt ist ueber `OfflineRespawnFreeze.FreezeWhileNoPlayerOnline`
+abschaltbar.
+
+## Warum die Bots dabei nicht stoeren
+
+Mit `AiPlayerbot.RandomBotAutologin = 1` spielen die Randombots, sobald der
+Worldserver laeuft, also auch waehrend niemand am Rechner sitzt. Ein pauschaler
+Freeze wuerde deren Kills mit einfrieren und die Welt entvoelkern.
+
+Deshalb wird nicht global eingefroren, sondern nur der Bestand, den der Mensch
+hinterlassen hat. Beim Logout wird `creature_respawn` in eine eigene Tabelle
+kopiert; beim Login zaehlen nur die Eintraege, die dort mit **gleicher**
+`respawnTime` wiederzufinden sind. Alles, was die Bots waehrend der Abwesenheit
+erlegt haben, steht nicht im Vermerk oder traegt einen anderen Zeitpunkt und
+laeuft voellig normal weiter.
+
+Eine Zuordnung nach Killer ist dafuer nicht noetig. Botsitzungen zaehlen ueber
+`WorldSession::IsBot()` nicht als Spieler; es zaehlen der letzte Logout und der
+erste Login eines Menschen. Sinnvoll ist das Verfahren daher bei einem einzigen
+Spieler beziehungsweise einer einzigen Spielergruppe.
 
 ## Was nicht betroffen ist
 
@@ -25,21 +54,37 @@ Instanzbindungen (`instance.resettime`) werden bewusst nicht verschoben. Sie
 laufen nach echter Kalenderzeit ab, damit die woechentlichen Resets mit der
 echten Woche synchron bleiben.
 
+Langlaeufer bleiben ebenfalls aussen vor, siehe `MaxSpawnTimeSecs`.
+
 ## Arbeitsweise
 
 | Zeitpunkt | Hook | Vorgang |
 |---|---|---|
 | Betrieb | `OnUpdate` | schreibt alle 60 Sekunden ein Lebenszeichen |
+| Logout des letzten Menschen | `OnPlayerLogout` | vermerkt Bestand und Zeitpunkt |
 | Herunterfahren | `OnAfterUnloadAllMaps` | vermerkt den Zeitpunkt als sauberes Ende |
-| Start | `OnBeforeWorldInitialized` | verschiebt die offenen Respawn-Zeiten |
+| Start | `OnBeforeWorldInitialized` | verschiebt um die Ausfallzeit |
+| Login des ersten Menschen | `OnPlayerLogin` | verschiebt um die Abwesenheit |
 
 Das Lebenszeichen deckt den Absturzfall ab: Ohne sauberes Herunterfahren gibt
 es sonst keinen Anhaltspunkt, ab wann der Server nicht mehr lief. Die
 Abweichung betraegt hoechstens ein Heartbeat-Intervall.
 
-Der Eingriff erfolgt in `OnBeforeWorldInitialized`, weil Karten ihre
+Der Eingriff beim Start erfolgt in `OnBeforeWorldInitialized`, weil Karten ihre
 Respawn-Zeiten beim Erzeugen lesen (`Map::LoadRespawnTimes`). Zu diesem
 Zeitpunkt existiert noch keine Karte.
+
+Beim Login ist das anders: Die Karten sind laengst geladen. Ein reines `UPDATE`
+bliebe dort wirkungslos, weil der Core mit seinem Speicherabbild weiterarbeitet.
+Das Modul schreibt deshalb ueber `Map::SaveCreatureRespawnTime`, das Karte,
+Respawn-Queue und Datenbank gemeinsam pflegt, und setzt zusaetzlich den Timer
+am Kreaturobjekt selbst (`Creature::SetRespawnTime`). Letzteres ist noetig, weil
+der Standardfall in AzerothCore der Compatibility-Modus ist: Dort zaehlt das
+Objekt seine Respawnzeit in `m_respawnTime` selbst herunter.
+
+Die Ausfallzeit wird nicht doppelt gezaehlt. Steht beim Start ein Anker aus
+einem Logout, wandert er um dieselbe Spanne mit, sodass beim Login nur noch die
+Zeit uebrig bleibt, in der der Server ohne Spieler lief.
 
 ## Sonderfaelle
 
@@ -51,15 +96,41 @@ ein Jahr", um zu kennzeichnen, dass eine Kreatur vor dem naechsten Reset nicht
 wiederkehrt. Das ist eine Markierung, kein Zeitpunkt. `MaxFutureDays` haelt
 solche Werte aus der Verschiebung heraus.
 
+Stuerzt der Server ab, waehrend jemand angemeldet ist, bleibt der Anker leer.
+Dann greift wie zuvor der Startpfad mit der pauschalen Karenz.
+
+## Langlaeufer
+
+Der Freeze macht aus Kalenderzeit Spielzeit. Bei gewoehnlichen Mobs faellt das
+nicht auf: In einer Messung am eigenen Bestand hatten 817 von 889 offenen
+Eintraegen eine eigene Respawnzeit von hoechstens fuenf Minuten, sie stehen also
+kurz nach dem Login ohnehin wieder da.
+
+Bei seltenen Elite-Spawns kehrt sich die Wirkung um. Grunter mit 42 Stunden
+oder Kurmokk mit 35 Stunden waeren bei zwei Stunden Spiel am Abend nicht mehr
+nach zwei Tagen zurueck, sondern nach Wochen. Dasselbe gilt fuer Event-NPCs,
+deren Ereignis nach echtem Kalender laeuft. `MaxSpawnTimeSecs` nimmt solche
+Spawns von der Verschiebung aus; mit der Vorgabe von 1800 Sekunden betraf das
+in derselben Messung 11 von 889 Eintraegen.
+
+Ein Radius um den Spieler waere die naheliegende, aber schwaechere Alternative:
+Er wuerde nur die ersten Minuten nach dem Login anders machen und braeuchte
+einen Mittelpunkt, den es bei Gruppenbots, Instanzen und Fluegen quer ueber den
+Kontinent nicht eindeutig gibt.
+
 ## Einstellungen
 
 Siehe `conf/offline_respawn_freeze.conf.dist`. Fuer den ersten Lauf empfiehlt
 sich `OfflineRespawnFreeze.DryRun = 1`: Das Modul rechnet und protokolliert
 dann vollstaendig, ohne etwas zu schreiben.
 
-## Zustandstabelle
+## Eigene Tabellen
 
-Das Modul legt `mod_offline_respawn_freeze` in `acore_characters` selbst an.
-Sie enthaelt eine einzige Zeile mit dem letzten bekannten Serverzeitpunkt, der
-Angabe, ob sauber beendet wurde, sowie Umfang und Zeitpunkt der letzten
-Verschiebung.
+Das Modul legt beide Tabellen in `acore_characters` selbst an.
+
+`mod_offline_respawn_freeze` enthaelt eine einzige Zeile mit dem letzten
+bekannten Serverzeitpunkt, der Angabe, ob sauber beendet wurde, dem Anker des
+letzten Logouts sowie Umfang und Zeitpunkt der letzten Verschiebung.
+
+`mod_offline_respawn_freeze_snapshot` haelt zwischen Logout und Login den
+vermerkten Bestand. Ausserhalb dieser Spanne ist die Tabelle leer.
