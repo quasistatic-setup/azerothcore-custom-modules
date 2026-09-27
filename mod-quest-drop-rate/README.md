@@ -9,4 +9,5 @@ Quest-Anforderung, alle `Rate.Drop.Item.*`-Werte und Questgegenstände in
 Loot-Gruppen, die auch normale Gegenstände enthalten. Betrieb und Wirkung
 beschreibt `docs/einstellungen.md` im WoW-Server-Verzeichnis.
 
-`src/QuestDropRateLogic.h` enthält die Rechenlogik ohne Core-Abhängigkeiten.
+`src/QuestDropRateLogic.h` enthält die Rechenlogik ohne Core-Abhängigkeiten;
+`tests/run_logic_test.sh` prüft sie ohne Server.
