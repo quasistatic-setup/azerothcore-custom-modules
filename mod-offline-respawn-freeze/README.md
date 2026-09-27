@@ -17,10 +17,10 @@ Das Modul gleicht zwei Spannen aus:
    verbleibenden Minuten hat nach zwanzig Stunden Ausfallzeit weiterhin sieben
    Minuten vor sich.
 2. **Server laeuft, niemand angemeldet.** Beim Logout des letzten menschlichen
-   Spielers wird der offene Bestand vermerkt, beim Login des ersten Menschen um
-   genau die Abwesenheit verschoben. Diese Spanne deckt ab, dass der Server
-   typischerweise vor dem Einloggen und nach dem Ausloggen noch eine Weile
-   laeuft.
+   Spielers werden die offenen Respawns geparkt und ihre Restzeit vermerkt,
+   beim Login des ersten Menschen erhalten sie genau diese Restzeit zurueck.
+   Diese Spanne deckt ab, dass der Server typischerweise vor dem Einloggen und
+   nach dem Ausloggen noch eine Weile laeuft.
 
 Der zweite Punkt ist ueber `OfflineRespawnFreeze.FreezeWhileNoPlayerOnline`
 abschaltbar.
@@ -32,11 +32,11 @@ Worldserver laeuft, also auch waehrend niemand am Rechner sitzt. Ein pauschaler
 Freeze wuerde deren Kills mit einfrieren und die Welt entvoelkern.
 
 Deshalb wird nicht global eingefroren, sondern nur der Bestand, den der Mensch
-hinterlassen hat. Beim Logout wird `creature_respawn` in eine eigene Tabelle
-kopiert; beim Login zaehlen nur die Eintraege, die dort mit **gleicher**
-`respawnTime` wiederzufinden sind. Alles, was die Bots waehrend der Abwesenheit
-erlegt haben, steht nicht im Vermerk oder traegt einen anderen Zeitpunkt und
-laeuft voellig normal weiter.
+hinterlassen hat. Beim Logout werden die offenen Respawns auf einen Zeitpunkt
+ein Jahr in der Zukunft gesetzt ("geparkt"); ihre Restzeit steht in einer
+eigenen Tabelle. Beim Login erhaelt jeder Eintrag, der noch den Parkwert
+traegt, seine Restzeit ab jetzt zurueck. Alles, was die Bots waehrend der
+Abwesenheit erlegen, wird nicht geparkt und laeuft voellig normal weiter.
 
 Eine Zuordnung nach Killer ist dafuer nicht noetig. Botsitzungen zaehlen ueber
 `WorldSession::IsBot()` nicht als Spieler; es zaehlen der letzte Logout und der
@@ -61,10 +61,10 @@ Langlaeufer bleiben ebenfalls aussen vor, siehe `MaxSpawnTimeSecs`.
 | Zeitpunkt | Hook | Vorgang |
 |---|---|---|
 | Betrieb | `OnUpdate` | schreibt alle 60 Sekunden ein Lebenszeichen |
-| Logout des letzten Menschen | `OnPlayerLogout` | vermerkt Bestand und Zeitpunkt |
+| Logout des letzten Menschen | `OnPlayerLogout` | parkt offene Respawns, vermerkt Restzeiten |
 | Herunterfahren | `OnAfterUnloadAllMaps` | vermerkt den Zeitpunkt als sauberes Ende |
 | Start | `OnBeforeWorldInitialized` | verschiebt um die Ausfallzeit |
-| Login des ersten Menschen | `OnPlayerLogin` | verschiebt um die Abwesenheit |
+| Login des ersten Menschen | `OnPlayerLogin` | setzt jeden geparkten Eintrag auf jetzt plus Restzeit |
 
 Das Lebenszeichen deckt den Absturzfall ab: Ohne sauberes Herunterfahren gibt
 es sonst keinen Anhaltspunkt, ab wann der Server nicht mehr lief. Die
@@ -74,17 +74,22 @@ Der Eingriff beim Start erfolgt in `OnBeforeWorldInitialized`, weil Karten ihre
 Respawn-Zeiten beim Erzeugen lesen (`Map::LoadRespawnTimes`). Zu diesem
 Zeitpunkt existiert noch keine Karte.
 
-Beim Login ist das anders: Die Karten sind laengst geladen. Ein reines `UPDATE`
-bliebe dort wirkungslos, weil der Core mit seinem Speicherabbild weiterarbeitet.
-Das Modul schreibt deshalb ueber `Map::SaveCreatureRespawnTime`, das Karte,
-Respawn-Queue und Datenbank gemeinsam pflegt, und setzt zusaetzlich den Timer
-am Kreaturobjekt selbst (`Creature::SetRespawnTime`). Letzteres ist noetig, weil
-der Standardfall in AzerothCore der Compatibility-Modus ist: Dort zaehlt das
-Objekt seine Respawnzeit in `m_respawnTime` selbst herunter.
+Beim Logout und Login ist das anders: Die Karten sind geladen und arbeiten mit
+ihrem Speicherabbild. Das Modul schreibt deshalb ueber
+`Map::SaveCreatureRespawnTime`, das Karte, Respawn-Queue und Datenbank gemeinsam
+pflegt, und setzt zusaetzlich den Timer tot liegender Kreaturobjekte
+(`Creature::SetRespawnTime`). Kreaturen, die beim Logout noch als Leiche liegen,
+haben noch keinen Eintrag; sie werden ueber das Kreaturobjekt erfasst. Nicht
+geladene Karten werden direkt in der Datenbank geparkt.
 
-Die Ausfallzeit wird nicht doppelt gezaehlt. Steht beim Start ein Anker aus
-einem Logout, wandert er um dieselbe Spanne mit, sodass beim Login nur noch die
-Zeit uebrig bleibt, in der der Server ohne Spieler lief.
+Parken statt nur Vermerken ist noetig, weil die Respawn-Queue der Karte
+(`Map::ProcessRespawns`) faellige Kreaturen erscheinen laesst, sobald ihr Grid
+geladen ist, und dabei den Eintrag loescht. Grids bleiben nach dem Logout noch
+Minuten geladen, in der Naehe von Bots dauerhaft. Ein Verschieben erst beim
+Login fand deshalb nichts mehr vor.
+
+Beim Start bleiben geparkte Eintraege unberuehrt. Die pauschale Karenz entfaellt
+dann, weil der Login die Restzeit exakt zurueckgibt.
 
 ## Sonderfaelle
 
@@ -98,6 +103,14 @@ solche Werte aus der Verschiebung heraus.
 
 Stuerzt der Server ab, waehrend jemand angemeldet ist, bleibt der Anker leer.
 Dann greift wie zuvor der Startpfad mit der pauschalen Karenz.
+
+Wer das Modul abschaltet, waehrend Respawns geparkt sind, sollte sich vorher
+einmal anmelden. Sonst bleiben die geparkten Mobs bis zu einem Jahr aus.
+`FreezeWhileNoPlayerOnline = 0` ist dagegen unkritisch: Der naechste Start gibt
+den geparkten Eintraegen ihre Restzeit zurueck.
+
+Liegt der Logout laenger als `MaxDowntimeDays` zurueck, erscheint beim Login
+alles Geparkte sofort, als waere die Zeit normal gelaufen.
 
 ## Langlaeufer
 
@@ -133,4 +146,5 @@ bekannten Serverzeitpunkt, der Angabe, ob sauber beendet wurde, dem Anker des
 letzten Logouts sowie Umfang und Zeitpunkt der letzten Verschiebung.
 
 `mod_offline_respawn_freeze_snapshot` haelt zwischen Logout und Login den
-vermerkten Bestand. Ausserhalb dieser Spanne ist die Tabelle leer.
+geparkten Bestand: urspruenglicher Zeitpunkt, Restzeit und Parkwert. Ausserhalb
+dieser Spanne ist die Tabelle leer.

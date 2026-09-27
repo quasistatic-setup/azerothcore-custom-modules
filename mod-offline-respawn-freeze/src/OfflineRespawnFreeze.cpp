@@ -10,9 +10,9 @@
  *   1. Server aus. Beim Start werden die offenen Zeitpunkte um die Ausfallzeit
  *      nach hinten verschoben.
  *   2. Server laeuft, aber kein menschlicher Spieler ist angemeldet. Beim
- *      Logout wird der Bestand vermerkt, beim naechsten Login um genau diese
- *      Spanne verschoben. Was die Bots waehrenddessen erlegen, bleibt
- *      unberuehrt und respawnt normal.
+ *      Logout werden die offenen Respawns geparkt und ihre Restzeit vermerkt,
+ *      beim naechsten Login erhalten sie genau diese Restzeit zurueck. Was die
+ *      Bots waehrenddessen erlegen, bleibt unberuehrt und respawnt normal.
  *
  * GameObjects (Kraeuter, Erz, Truhen) bleiben unberuehrt, ebenso Auktionen,
  * Post, Kalender und die Weltzeit.
@@ -34,11 +34,24 @@
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
 
+#include <algorithm>
+#include <map>
+#include <set>
+#include <vector>
+
 namespace
 {
     constexpr char const* STATE_TABLE    = "mod_offline_respawn_freeze";
     constexpr char const* SNAPSHOT_TABLE = "mod_offline_respawn_freeze_snapshot";
     constexpr uint32 SECONDS_PER_DAY     = 86400;
+
+    // Parkzeit waehrend der Abwesenheit. Bewusst gleich der Jahresmarkierung,
+    // auf die Map::SaveCreatureRespawnTime in Instanzen mit Reset-Periode ohnehin
+    // kuerzt; so ergibt sich in beiden Faellen derselbe Wert.
+    constexpr uint32 PARK_SECONDS        = 365 * SECONDS_PER_DAY;
+
+    // Schnappschuesse werden in Bloecken geschrieben, nicht Zeile fuer Zeile.
+    constexpr std::size_t INSERT_CHUNK   = 500;
 
     struct Settings
     {
@@ -81,35 +94,51 @@ namespace
         return g_cfg.includeInstances ? "" : Acore::StringFormat(" AND {}instanceId = 0", prefix);
     }
 
-    // Ergebnis einer Verschiebung, ausschliesslich fuer die Protokollzeile.
+    // Schlachtfelder und Arenen werden nach dem Spiel ohnehin verworfen.
+    bool InScope(Map const* map)
+    {
+        if (map->IsBattlegroundOrArena())
+            return false;
+
+        return g_cfg.includeInstances || map->GetInstanceId() == 0;
+    }
+
+    // Langlaeufer laufen nach echter Zeit weiter. Ein seltener Spawn mit 42
+    // Stunden wuerde sonst aus Kalenderzeit Spielzeit machen und bei wenigen
+    // Stunden Spiel am Tag ueber Wochen ausbleiben. Dasselbe gilt fuer
+    // Event-NPCs, deren Ereignis ohnehin nach Kalender laeuft.
+    bool IsLongRunner(uint32 guid)
+    {
+        if (!g_cfg.maxSpawnTimeSecs)
+            return false;
+
+        CreatureData const* data = sObjectMgr->GetCreatureData(guid);
+        return data && data->spawntimesecs > g_cfg.maxSpawnTimeSecs;
+    }
+
+    // Ergebnis eines Durchgangs, ausschliesslich fuer die Protokollzeile.
     struct ShiftResult
     {
-        uint32 shifted   = 0;   // tatsaechlich verschobene Eintraege
-        uint32 inMemory  = 0;   // davon auf bereits geladenen Karten
+        uint32 shifted     = 0; // tatsaechlich bearbeitete Eintraege
+        uint32 inMemory    = 0; // davon auf bereits geladenen Karten
         uint32 skippedLong = 0; // wegen MaxSpawnTimeSecs ausgenommen
+        uint32 changed     = 0; // waehrend der Abwesenheit von aussen veraendert
     };
 
     std::string SkippedNote(ShiftResult const& res)
     {
-        if (!res.skippedLong)
-            return std::string();
-
-        return Acore::StringFormat(", {} Langlaeufer ausgenommen", res.skippedLong);
+        std::string out;
+        if (res.skippedLong)
+            out += Acore::StringFormat(", {} Langlaeufer ausgenommen", res.skippedLong);
+        if (res.changed)
+            out += Acore::StringFormat(", {} zwischenzeitlich veraendert", res.changed);
+        return out;
     }
 
-    // Kern beider Pfade. Der Aufrufer liefert ein SELECT mit den Spalten
-    // guid, instanceId, mapId, respawnTime.
-    //
-    // touchLoadedMaps  Beim Login sind Karten geladen. Ein reines UPDATE auf
-    //                  creature_respawn bliebe dann wirkungslos, weil die Karte
-    //                  ihre Zeiten nur beim Erzeugen liest. Map::SaveCreature-
-    //                  RespawnTime pflegt Karte, Respawn-Queue und Datenbank in
-    //                  einem Zug; zusaetzlich braucht der Legacy-Pfad das
-    //                  Kreaturobjekt selbst, das seinen Timer in m_respawnTime
-    //                  mitfuehrt (Creature::Update, DeathState::Dead).
-    // updateSnapshot   Beim Start wandert der gemerkte Bestand mit, sonst
-    //                  passt er beim naechsten Login nicht mehr zum Istzustand.
-    ShiftResult ShiftRespawnTimes(std::string const& select, int64 shift, bool touchLoadedMaps, bool updateSnapshot)
+    // Startpfad. Beim Start ist noch keine Karte erzeugt, daher rein ueber die
+    // Datenbank. Der Aufrufer liefert ein SELECT mit den Spalten guid,
+    // instanceId, mapId, respawnTime.
+    ShiftResult ShiftRespawnTimes(std::string const& select, int64 shift)
     {
         ShiftResult res;
 
@@ -117,9 +146,7 @@ namespace
         if (!rows)
             return res;
 
-        time_t const now = GameTime::GetGameTime().count();
         bool const apply = !g_cfg.dryRun;
-
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
 
         do
@@ -127,56 +154,17 @@ namespace
             Field* f = rows->Fetch();
             uint32 const guid       = f[0].Get<uint32>();
             uint32 const instanceId = f[1].Get<uint32>();
-            uint32 const mapId      = f[2].Get<uint32>();
             uint32 const oldTime    = f[3].Get<uint32>();
 
-            // Langlaeufer laufen nach echter Zeit weiter. Ein seltener Spawn mit
-            // 42 Stunden wuerde sonst aus Kalenderzeit Spielzeit machen und bei
-            // wenigen Stunden Spiel am Tag ueber Wochen ausbleiben. Dasselbe gilt
-            // fuer Event-NPCs, deren Ereignis ohnehin nach Kalender laeuft.
-            if (g_cfg.maxSpawnTimeSecs)
+            if (IsLongRunner(guid))
             {
-                CreatureData const* data = sObjectMgr->GetCreatureData(guid);
-                if (data && data->spawntimesecs > g_cfg.maxSpawnTimeSecs)
-                {
-                    ++res.skippedLong;
-                    continue;
-                }
+                ++res.skippedLong;
+                continue;
             }
 
-            uint32 newTime = oldTime + static_cast<uint32>(shift);
-            bool handledInMemory = false;
-
-            if (apply && touchLoadedMaps)
-            {
-                if (Map* map = sMapMgr->FindMap(mapId, instanceId))
-                {
-                    time_t stored = static_cast<time_t>(newTime);
-                    map->SaveCreatureRespawnTime(guid, stored);
-                    newTime = static_cast<uint32>(stored);
-
-                    if (stored > now)
-                    {
-                        uint32 const remaining = static_cast<uint32>(stored - now);
-                        auto bounds = map->GetCreatureBySpawnIdStore().equal_range(guid);
-                        for (auto itr = bounds.first; itr != bounds.second; ++itr)
-                            if (Creature* creature = itr->second)
-                                if (!creature->IsAlive())
-                                    creature->SetRespawnTime(remaining);
-                    }
-
-                    handledInMemory = true;
-                    ++res.inMemory;
-                }
-            }
-
-            if (apply && !handledInMemory)
+            if (apply)
                 trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {}",
-                              newTime, guid, instanceId);
-
-            if (apply && updateSnapshot)
-                trans->Append("UPDATE `{}` SET respawnTime = {} WHERE guid = {} AND instanceId = {}",
-                              SNAPSHOT_TABLE, newTime, guid, instanceId);
+                              oldTime + static_cast<uint32>(shift), guid, instanceId);
 
             ++res.shifted;
         }
@@ -186,6 +174,20 @@ namespace
             CharacterDatabase.CommitTransaction(trans);
 
         return res;
+    }
+
+    // Setzt geparkte Eintraege auf "jetzt plus Restzeit", ohne geladene Karten.
+    // Nur fuer den Start, wenn der Sitzungsanker abgeschaltet wurde.
+    void RestoreParkedInDb(uint32 now)
+    {
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        trans->Append(
+            "UPDATE creature_respawn r JOIN `{}` s ON s.guid = r.guid AND s.instanceId = r.instanceId "
+            "SET r.respawnTime = {} + s.remaining WHERE r.respawnTime = s.parkedTime",
+            SNAPSHOT_TABLE, now);
+        trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
+        trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
+        CharacterDatabase.CommitTransaction(trans);
     }
 
     // Zaehlt die angemeldeten Menschen. Botsitzungen tragen kein Socket und
@@ -298,6 +300,22 @@ private:
         _enabled = g_cfg.enabled;
     }
 
+    // MySQL 8 kennt kein ADD COLUMN IF NOT EXISTS; fuer bestehende
+    // Installationen werden Spalten daher gezielt nachgezogen.
+    void EnsureColumn(char const* table, char const* column, char const* definition)
+    {
+        QueryResult hasColumn = CharacterDatabase.Query(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{}' AND COLUMN_NAME = '{}'",
+            table, column);
+
+        if (hasColumn && (*hasColumn)[0].Get<uint64>() == 0)
+        {
+            CharacterDatabase.DirectExecute("ALTER TABLE `{}` ADD COLUMN `{}` {}", table, column, definition);
+            LOG_INFO("module", "[RespawnFreeze] Tabelle {} um {} erweitert.", table, column);
+        }
+    }
+
     void EnsureTables()
     {
         // Bewusst im Code statt als SQL-Datei: Es handelt sich um zwei Tabellen,
@@ -315,31 +333,27 @@ private:
             "COMMENT='mod-offline-respawn-freeze: letzter bekannter Serverzeitpunkt'",
             STATE_TABLE);
 
-        // MySQL 8 kennt kein ADD COLUMN IF NOT EXISTS; fuer bestehende
-        // Installationen wird die Spalte daher gezielt nachgezogen.
-        QueryResult hasColumn = CharacterDatabase.Query(
-            "SELECT COUNT(*) FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{}' AND COLUMN_NAME = 'absence_start'",
-            STATE_TABLE);
+        EnsureColumn(STATE_TABLE, "absence_start", "INT UNSIGNED NOT NULL DEFAULT 0");
 
-        if (hasColumn && (*hasColumn)[0].Get<uint64>() == 0)
-        {
-            CharacterDatabase.DirectExecute("ALTER TABLE `{}` ADD COLUMN `absence_start` INT UNSIGNED NOT NULL DEFAULT 0", STATE_TABLE);
-            LOG_INFO("module", "[RespawnFreeze] Zustandstabelle um absence_start erweitert.");
-        }
-
-        // Bestand beim Logout des letzten Menschen. Die Spalten spiegeln
-        // creature_respawn, damit der Vergleich beim Login exakt bleibt.
+        // Geparkter Bestand zwischen dem Logout des letzten Menschen und dem
+        // naechsten Login. respawnTime ist der urspruengliche Zeitpunkt,
+        // remaining die Restzeit beim Logout, parkedTime der Parkwert, an dem
+        // der Login einen unveraenderten Eintrag wiedererkennt.
         CharacterDatabase.DirectExecute(
             "CREATE TABLE IF NOT EXISTS `{}` ("
             "`guid` INT UNSIGNED NOT NULL DEFAULT 0,"
             "`respawnTime` INT UNSIGNED NOT NULL DEFAULT 0,"
             "`mapId` SMALLINT UNSIGNED NOT NULL DEFAULT 0,"
             "`instanceId` INT UNSIGNED NOT NULL DEFAULT 0,"
+            "`remaining` INT UNSIGNED NOT NULL DEFAULT 0,"
+            "`parkedTime` INT UNSIGNED NOT NULL DEFAULT 0,"
             "PRIMARY KEY (`guid`, `instanceId`)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
-            "COMMENT='mod-offline-respawn-freeze: Bestand beim Logout des letzten Spielers'",
+            "COMMENT='mod-offline-respawn-freeze: geparkter Bestand beim Logout des letzten Spielers'",
             SNAPSHOT_TABLE);
+
+        EnsureColumn(SNAPSHOT_TABLE, "remaining", "INT UNSIGNED NOT NULL DEFAULT 0");
+        EnsureColumn(SNAPSHOT_TABLE, "parkedTime", "INT UNSIGNED NOT NULL DEFAULT 0");
     }
 
     void WriteState(uint32 lastSeen, bool cleanShutdown, bool synchronous)
@@ -374,21 +388,38 @@ private:
         bool   const wasClean = fields[1].Get<uint8>() != 0;
         uint32 absenceStart   = fields[2].Get<uint32>();
 
-        // Wurde der Sitzungsanker abgeschaltet, waehrend einer stand, bliebe er
-        // sonst samt Schnappschuss dauerhaft liegen.
-        if (!g_cfg.trackSession && absenceStart > 0 && !g_cfg.dryRun)
+        if (absenceStart > 0 && !g_cfg.dryRun)
         {
-            CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-            trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
-            trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
-            CharacterDatabase.CommitTransaction(trans);
-            absenceStart = 0;
-            LOG_INFO("module", "[RespawnFreeze] Sitzungsanker ist abgeschaltet; alter Anker verworfen.");
+            // Vermerk aus der Zeit vor dem Parken: ohne Restzeiten ist er nicht
+            // mehr auswertbar. Die Eintraege selbst wurden damals nicht
+            // veraendert und laufen einfach weiter.
+            QueryResult legacy = CharacterDatabase.Query(
+                "SELECT COUNT(*) FROM `{}` WHERE parkedTime = 0", SNAPSHOT_TABLE);
+
+            if (legacy && (*legacy)[0].Get<uint64>() > 0)
+            {
+                CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+                trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
+                trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
+                CharacterDatabase.CommitTransaction(trans);
+                absenceStart = 0;
+                LOG_INFO("module", "[RespawnFreeze] Alter Vermerk ohne Parkzeiten verworfen.");
+            }
+            // Wurde der Sitzungsanker abgeschaltet, waehrend einer stand, blieben
+            // die geparkten Mobs sonst ein Jahr lang aus. Sie erhalten ihre
+            // Restzeit ab jetzt zurueck.
+            else if (!g_cfg.trackSession)
+            {
+                RestoreParkedInDb(now);
+                absenceStart = 0;
+                LOG_INFO("module", "[RespawnFreeze] Sitzungsanker ist abgeschaltet; geparkte Respawns laufen ab jetzt mit ihrer Restzeit weiter.");
+            }
         }
 
         // Ein gesetzter Anker bedeutet: Der letzte Mensch war beim Herunterfahren
-        // bereits abgemeldet. Dann uebernimmt der Login-Pfad die Spanne zwischen
-        // Serverstart und Login, und die pauschale Karenz entfaellt.
+        // bereits abgemeldet, sein Bestand ist geparkt. Die pauschale Karenz
+        // entfaellt dann, weil der Login jedem geparkten Eintrag seine exakte
+        // Restzeit zurueckgibt.
         bool const anchored = g_cfg.trackSession && absenceStart > 0;
 
         // Gegen eine zurueckgestellte Systemuhr: signed rechnen, sonst laeuft
@@ -427,9 +458,10 @@ private:
         // jemand in der Welt steht, vergeht Zeit: Client starten, anmelden,
         // Charakter waehlen, Gebiet laden. Diese Spanne liefe ungebremst gegen
         // die Respawns, und die Bots toeten waehrenddessen bereits. Ohne Anker
-        // gleicht die Karenz das pauschal aus; mit Anker rechnet der Login-Pfad
-        // sie genau ab. Sie wird erst hier aufgeschlagen, damit sie die
-        // Plausibilitaetsschwellen oben nicht verfaelscht.
+        // gleicht die Karenz das pauschal aus; mit Anker ist der Bestand des
+        // Spielers geparkt und braucht sie nicht. Sie wird erst hier
+        // aufgeschlagen, damit sie die Plausibilitaetsschwellen oben nicht
+        // verfaelscht.
         int64 const shift = downtime + (anchored ? 0 : static_cast<int64>(g_cfg.graceSeconds));
 
         //   respawnTime > lastSeen   laesst bereits faellige Eintraege in Ruhe,
@@ -438,18 +470,19 @@ private:
         //   respawnTime < obergrenze schuetzt die Markierung "now + YEAR", mit
         //                            der Map::SaveCreatureRespawnTime Kreaturen
         //                            kennzeichnet, die vor dem Instanz-Reset
-        //                            nicht wiederkehren.
+        //                            nicht wiederkehren, und die geparkten
+        //                            Eintraege.
+        //   NOT EXISTS               haelt geparkte Eintraege auch dann heraus,
+        //                            wenn der Server laenger ohne Spieler lief.
         uint32 const upperBound = lastSeen + g_cfg.maxFutureDays * SECONDS_PER_DAY;
 
         std::string const select = Acore::StringFormat(
-            "SELECT guid, instanceId, mapId, respawnTime FROM creature_respawn "
-            "WHERE respawnTime > {} AND respawnTime < {}{}",
-            lastSeen, upperBound, InstanceScope(""));
+            "SELECT r.guid, r.instanceId, r.mapId, r.respawnTime FROM creature_respawn r "
+            "WHERE r.respawnTime > {} AND r.respawnTime < {}{} AND NOT EXISTS ("
+            "SELECT 1 FROM `{}` s WHERE s.guid = r.guid AND s.instanceId = r.instanceId AND s.parkedTime = r.respawnTime)",
+            lastSeen, upperBound, InstanceScope("r."), SNAPSHOT_TABLE);
 
-        // Beim Start ist noch keine Karte erzeugt, daher rein ueber die
-        // Datenbank. Der gemerkte Bestand wandert mit, damit der Login-Pfad ihn
-        // spaeter noch wiedererkennt.
-        ShiftResult const res = ShiftRespawnTimes(select, shift, false, anchored);
+        ShiftResult const res = ShiftRespawnTimes(select, shift);
 
         std::string const grace = anchored
             ? std::string()
@@ -467,13 +500,14 @@ private:
         }
 
         if (anchored)
-            LOG_INFO("module", "[RespawnFreeze] Anker vom letzten Logout steht. Die Spanne bis zum Login wird beim Anmelden verrechnet.");
+            LOG_INFO("module", "[RespawnFreeze] Bestand vom letzten Logout ist geparkt und erhaelt beim Login seine Restzeit zurueck.");
 
         FinishStartup(now, absenceStart, shift, res.shifted);
     }
 
-    // Schreibt den Zustand fort. Der Anker wandert um dieselbe Spanne mit, sonst
-    // wuerde die Ausfallzeit beim Login ein zweites Mal gezaehlt.
+    // Schreibt den Zustand fort. Der Anker wandert um dieselbe Spanne mit, damit
+    // die beim Login gemeldete Abwesenheit nur die Zeit mit laufendem Server
+    // enthaelt und MaxDowntimeDays nicht doppelt zaehlt.
     void FinishStartup(uint32 now, uint32 absenceStart, int64 shift, uint32 rows)
     {
         if (g_cfg.dryRun)
@@ -536,33 +570,168 @@ public:
     }
 
 private:
-    // Merkt sich den Bestand. creature_respawn ist ein laufendes Abbild des
-    // Speicherzustands, weil Map::SaveCreatureRespawnTime jede Aenderung sofort
-    // schreibt; der Schnappschuss ist damit exakt.
+    struct ParkedEntry
+    {
+        uint32 guid;
+        uint32 instanceId;
+        uint32 mapId;
+        uint32 respawnTime;
+        uint32 remaining;
+        uint32 parkedTime;
+    };
+
+    // Parkt alle offenen Respawns weit in der Zukunft und vermerkt ihre
+    // Restzeit.
+    //
+    // Ein blosses Vermerken reicht nicht: Die Respawn-Queue der Karte
+    // (Map::ProcessRespawns) laesst faellige Kreaturen erscheinen, sobald ihr
+    // Grid geladen ist, und loescht dabei den Eintrag. Grids bleiben nach dem
+    // Logout noch Minuten geladen, in der Naehe von Bots dauerhaft. Beim Login
+    // waere dann nichts mehr zu verschieben.
+    //
+    // Quellen sind fuer geladene Karten deren Speicherabbild, fuer alle
+    // anderen die Datenbank. Kreaturen, die gerade als Leiche liegen, haben
+    // noch keinen Eintrag; sie werden ueber das Kreaturobjekt erfasst.
     void Freeze()
     {
         uint32 const now = static_cast<uint32>(GameTime::GetGameTime().count());
 
         if (g_cfg.dryRun)
         {
-            LOG_INFO("module", "[RespawnFreeze] Probelauf: Logout des letzten Spielers, es wird nichts vermerkt.");
+            LOG_INFO("module", "[RespawnFreeze] Probelauf: Logout des letzten Spielers, es wird nichts geparkt.");
             return;
         }
 
+        uint32 const upperBound = now + g_cfg.maxFutureDays * SECONDS_PER_DAY;
+        uint32 const parkUntil  = now + PARK_SECONDS;
+
+        // Erst sammeln, dann schreiben: DoForAllMaps haelt die Sperre des
+        // MapMgr, und SaveCreatureRespawnTime veraendert die Tabelle, ueber
+        // die gerade gelaufen wird.
+        std::vector<Map*> maps;
+        sMapMgr->DoForAllMaps([&maps](Map* map)
+        {
+            if (InScope(map))
+                maps.push_back(map);
+        });
+
+        ShiftResult res;
+        std::vector<ParkedEntry> parked;
+        std::set<std::pair<uint32, uint32>> loaded;
+
+        auto isOpen = [&](uint32 guid, time_t respawnTime)
+        {
+            if (respawnTime <= static_cast<time_t>(now) || respawnTime >= static_cast<time_t>(upperBound))
+                return false;
+
+            if (IsLongRunner(guid))
+            {
+                ++res.skippedLong;
+                return false;
+            }
+
+            return true;
+        };
+
+        for (Map* map : maps)
+        {
+            loaded.emplace(map->GetId(), map->GetInstanceId());
+
+            std::map<uint32, time_t> open;
+            for (auto const& [guid, respawnTime] : map->GetCreatureRespawnTimes())
+                if (isOpen(guid, respawnTime))
+                    open.emplace(guid, respawnTime);
+
+            for (auto const& [guid, creature] : map->GetCreatureBySpawnIdStore())
+            {
+                if (!creature || creature->IsAlive() || open.count(guid))
+                    continue;
+
+                CreatureData const* data = sObjectMgr->GetCreatureData(guid);
+                if (!data || !data->dbData)
+                    continue;
+
+                if (isOpen(guid, creature->GetRespawnTime()))
+                    open.emplace(guid, creature->GetRespawnTime());
+            }
+
+            for (auto const& [guid, respawnTime] : open)
+            {
+                time_t stored = parkUntil;
+                map->SaveCreatureRespawnTime(guid, stored);
+
+                auto bounds = map->GetCreatureBySpawnIdStore().equal_range(guid);
+                for (auto itr = bounds.first; itr != bounds.second; ++itr)
+                    if (Creature* creature = itr->second)
+                        if (!creature->IsAlive())
+                            creature->SetRespawnTime(static_cast<uint32>(stored - now));
+
+                parked.push_back({ guid, map->GetInstanceId(), map->GetId(), static_cast<uint32>(respawnTime),
+                                   static_cast<uint32>(respawnTime - now), static_cast<uint32>(stored) });
+                ++res.inMemory;
+            }
+        }
+
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-        trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
-        trans->Append("INSERT INTO `{}` (guid, respawnTime, mapId, instanceId) "
-                      "SELECT guid, respawnTime, mapId, instanceId FROM creature_respawn WHERE respawnTime > {}{}",
-                      SNAPSHOT_TABLE, now, InstanceScope(""));
-        trans->Append("UPDATE `{}` SET absence_start = {} WHERE id = 1", STATE_TABLE, now);
+
+        // Karten, die gerade nicht geladen sind, lesen ihre Zeiten beim
+        // naechsten Erzeugen aus der Datenbank; dort genuegt das UPDATE.
+        if (QueryResult rows = CharacterDatabase.Query(
+                "SELECT guid, instanceId, mapId, respawnTime FROM creature_respawn "
+                "WHERE respawnTime > {} AND respawnTime < {}{}",
+                now, upperBound, InstanceScope("")))
+        {
+            do
+            {
+                Field* f = rows->Fetch();
+                uint32 const guid        = f[0].Get<uint32>();
+                uint32 const instanceId  = f[1].Get<uint32>();
+                uint32 const mapId       = f[2].Get<uint32>();
+                uint32 const respawnTime = f[3].Get<uint32>();
+
+                if (loaded.count({ mapId, instanceId }) || !isOpen(guid, respawnTime))
+                    continue;
+
+                trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {} AND respawnTime = {}",
+                              parkUntil, guid, instanceId, respawnTime);
+
+                parked.push_back({ guid, instanceId, mapId, respawnTime, respawnTime - now, parkUntil });
+            }
+            while (rows->NextRow());
+        }
+
+        // Kein DELETE vorab: Steht noch ein Vermerk ohne Login dazwischen, sind
+        // dessen Eintraege bereits geparkt und kaemen hier nicht mehr vor.
+        // Sie muessen im Vermerk bleiben, sonst erhielten sie nie ihre
+        // Restzeit zurueck.
+        for (std::size_t start = 0; start < parked.size(); start += INSERT_CHUNK)
+        {
+            std::string values;
+            std::size_t const end = std::min(parked.size(), start + INSERT_CHUNK);
+            for (std::size_t i = start; i < end; ++i)
+            {
+                ParkedEntry const& e = parked[i];
+                if (!values.empty())
+                    values += ',';
+                values += Acore::StringFormat("({},{},{},{},{},{})",
+                                              e.guid, e.respawnTime, e.mapId, e.instanceId, e.remaining, e.parkedTime);
+            }
+
+            trans->Append("REPLACE INTO `{}` (guid, respawnTime, mapId, instanceId, remaining, parkedTime) VALUES {}",
+                          SNAPSHOT_TABLE, values);
+        }
+
+        trans->Append("UPDATE `{}` SET absence_start = IF(absence_start = 0, {}, absence_start) WHERE id = 1", STATE_TABLE, now);
         CharacterDatabase.CommitTransaction(trans);
 
-        LOG_INFO("module", "[RespawnFreeze] Letzter Spieler abgemeldet. Bestand vermerkt; offene Respawns ruhen bis zum naechsten Login.");
+        res.shifted = static_cast<uint32>(parked.size());
+        LOG_INFO("module", "[RespawnFreeze] Letzter Spieler abgemeldet. {} Respawn-Zeiten geparkt, davon {} auf geladenen Karten{}.",
+                 res.shifted, res.inMemory, SkippedNote(res));
     }
 
-    // Verschiebt die vermerkten Eintraege um die Abwesenheit. Was die Bots
-    // zwischenzeitlich erlegt haben, steht nicht im Schnappschuss oder traegt
-    // eine andere respawnTime und bleibt damit unberuehrt.
+    // Gibt jedem geparkten Eintrag seine Restzeit zurueck, gerechnet ab jetzt.
+    // Wer den Parkwert nicht mehr traegt, wurde zwischenzeitlich von aussen
+    // veraendert (etwa per GM-Befehl) und bleibt unberuehrt.
     void Release()
     {
         uint32 const now = static_cast<uint32>(GameTime::GetGameTime().count());
@@ -579,68 +748,76 @@ private:
 
         int64 const absence = static_cast<int64>(now) - static_cast<int64>(absenceStart);
 
-        if (absence < 0)
-        {
-            LOG_WARN("module", "[RespawnFreeze] Anker liegt in der Zukunft (Systemuhr?). Es wird nichts verschoben.");
-            Clear();
-            return;
-        }
-
-        if (absence < static_cast<int64>(g_cfg.minAbsence))
-        {
-            LOG_DEBUG("module", "[RespawnFreeze] Abwesenheit {} liegt unter der Schwelle. Es wird nichts verschoben.",
-                      HumanDuration(absence));
-            Clear();
-            return;
-        }
-
+        // Nach sehr langer Abwesenheit erwartet niemand mehr einen bestimmten
+        // Mob; dann erscheint alles Geparkte sofort, als waere die Zeit
+        // normal gelaufen.
         int64 const maxAbsence = static_cast<int64>(g_cfg.maxDowntimeDays) * SECONDS_PER_DAY;
-        if (absence > maxAbsence)
-        {
-            LOG_WARN("module", "[RespawnFreeze] Abwesenheit {} uebersteigt die Obergrenze von {} Tagen. Es wird nichts verschoben.",
+        bool const tooLong = absence > maxAbsence;
+
+        if (tooLong)
+            LOG_WARN("module", "[RespawnFreeze] Abwesenheit {} uebersteigt die Obergrenze von {} Tagen. Geparkte Respawns erscheinen sofort.",
                      HumanDuration(absence), g_cfg.maxDowntimeDays);
-            Clear();
-            return;
-        }
 
-        uint32 const upperBound = absenceStart + g_cfg.maxFutureDays * SECONDS_PER_DAY;
-
-        // Der Vergleich auf gleiche respawnTime ist der eigentliche Filter: Wurde
-        // derselbe Spawn waehrend der Abwesenheit erneut erlegt, steht dort ein
-        // anderer Zeitpunkt, und der Eintrag gehoert den Bots.
-        std::string const select = Acore::StringFormat(
-            "SELECT r.guid, r.instanceId, r.mapId, r.respawnTime FROM creature_respawn r "
-            "JOIN `{}` s ON s.guid = r.guid AND s.instanceId = r.instanceId AND s.respawnTime = r.respawnTime "
-            "WHERE r.respawnTime > {} AND r.respawnTime < {}{}",
-            SNAPSHOT_TABLE, absenceStart, upperBound, InstanceScope("r."));
-
-        ShiftResult const res = ShiftRespawnTimes(select, absence, true, false);
-
-        if (g_cfg.dryRun)
-        {
-            LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten waeren betroffen{}. Probelauf aktiv: es wird nichts geschrieben.",
-                     HumanDuration(absence), res.shifted, SkippedNote(res));
-            return;
-        }
-
-        LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten verschoben, davon {} auf geladenen Karten{}.",
-                 HumanDuration(absence), res.shifted, res.inMemory, SkippedNote(res));
-
-        Clear(absence, res.shifted);
-    }
-
-    void Clear(int64 shift = 0, uint32 rows = 0)
-    {
+        ShiftResult res;
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
-        trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
 
-        if (rows)
+        if (QueryResult rows = CharacterDatabase.Query(
+                "SELECT guid, instanceId, mapId, remaining, parkedTime FROM `{}`", SNAPSHOT_TABLE))
+        {
+            do
+            {
+                Field* f = rows->Fetch();
+                uint32 const guid       = f[0].Get<uint32>();
+                uint32 const instanceId = f[1].Get<uint32>();
+                uint32 const mapId      = f[2].Get<uint32>();
+                uint32 const remaining  = f[3].Get<uint32>();
+                uint32 const parkedTime = f[4].Get<uint32>();
+
+                uint32 const target = tooLong ? now : now + remaining;
+
+                if (Map* map = sMapMgr->FindMap(mapId, instanceId))
+                {
+                    if (map->GetCreatureRespawnTime(guid) != static_cast<time_t>(parkedTime))
+                    {
+                        ++res.changed;
+                        continue;
+                    }
+
+                    time_t stored = target;
+                    map->SaveCreatureRespawnTime(guid, stored);
+
+                    // Tote Kreaturobjekte, auch Leichen, tragen den Parkwert
+                    // selbst. Kreaturen, die Bots seither erlegt haben, tragen
+                    // einen kleineren Wert und bleiben unberuehrt.
+                    auto bounds = map->GetCreatureBySpawnIdStore().equal_range(guid);
+                    for (auto itr = bounds.first; itr != bounds.second; ++itr)
+                        if (Creature* creature = itr->second)
+                            if (!creature->IsAlive() && creature->GetRespawnTime() >= static_cast<time_t>(parkedTime))
+                                creature->SetRespawnTime(stored > now ? static_cast<uint32>(stored - now) : 0);
+
+                    ++res.inMemory;
+                }
+                else
+                {
+                    trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {} AND respawnTime = {}",
+                                  target, guid, instanceId, parkedTime);
+                }
+
+                ++res.shifted;
+            }
+            while (rows->NextRow());
+        }
+
+        trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
+        if (res.shifted)
             trans->Append("UPDATE `{}` SET absence_start = 0, last_shift = {}, last_shift_rows = {} WHERE id = 1",
-                          STATE_TABLE, shift, rows);
+                          STATE_TABLE, std::max<int64>(absence, 0), res.shifted);
         else
             trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
-
         CharacterDatabase.CommitTransaction(trans);
+
+        LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten mit ihrer Restzeit fortgesetzt, davon {} auf geladenen Karten{}.",
+                 HumanDuration(absence), res.shifted, res.inMemory, SkippedNote(res));
     }
 };
 

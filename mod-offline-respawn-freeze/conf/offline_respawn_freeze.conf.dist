@@ -41,17 +41,19 @@ OfflineRespawnFreeze.DryRun = 0
 #    OfflineRespawnFreeze.FreezeWhileNoPlayerOnline
 #        Beschreibung: Respawnzeit auch dann anhalten, wenn der Server laeuft,
 #                      aber kein menschlicher Spieler angemeldet ist.
-#                      Beim Logout des letzten Menschen wird der offene Bestand
-#                      vermerkt, beim Login des ersten Menschen um genau die
-#                      Abwesenheit verschoben. Botsitzungen zaehlen dabei nicht
-#                      als Spieler (WorldSession::IsBot).
-#                      Was die Bots waehrend der Abwesenheit erlegen, steht
-#                      nicht im Vermerk und respawnt voellig normal. Der Freeze
-#                      betrifft nur den Bestand, den der Mensch hinterlassen
-#                      hat.
+#                      Beim Logout des letzten Menschen werden die offenen
+#                      Respawns geparkt und ihre Restzeit vermerkt, beim Login
+#                      des ersten Menschen erhalten sie genau diese Restzeit
+#                      zurueck. Botsitzungen zaehlen dabei nicht als Spieler
+#                      (WorldSession::IsBot).
+#                      Was die Bots waehrend der Abwesenheit erlegen, wird nicht
+#                      geparkt und respawnt voellig normal. Der Freeze betrifft
+#                      nur den Bestand, den der Mensch hinterlassen hat.
 #                      Damit entfaellt auch die pauschale Karenz beim Start:
-#                      Ist beim Herunterfahren ein Anker gesetzt, wird die
-#                      Spanne bis zum Login exakt abgerechnet statt geschaetzt.
+#                      Ist beim Herunterfahren ein Bestand geparkt, erhaelt er
+#                      beim Login seine exakte Restzeit zurueck.
+#                      Beim Abschalten gibt der naechste Start geparkten
+#                      Eintraegen ihre Restzeit zurueck.
 #                      Sinnvoll nur bei einem einzigen menschlichen Spieler
 #                      beziehungsweise einer einzigen Spielergruppe. Es zaehlen
 #                      der letzte Logout und der erste Login.
@@ -86,7 +88,7 @@ OfflineRespawnFreeze.HeartbeatSeconds = 60
 #                      Wirkt nur, wenn kein Anker aus einem Logout vorliegt,
 #                      also bei FreezeWhileNoPlayerOnline = 0 oder nach einem
 #                      Absturz waehrend des Spielens. Sonst rechnet der
-#                      Login-Pfad diese Spanne genau ab.
+#                      Login-Pfad den geparkten Bestand genau ab.
 #        Vorgabe:      300
 #
 
@@ -94,8 +96,10 @@ OfflineRespawnFreeze.StartupGraceSeconds = 300
 
 #
 #    OfflineRespawnFreeze.MinDowntimeSeconds
-#        Beschreibung: Unterhalb dieser Ausfallzeit wird nicht verschoben. Damit
-#                      bleiben gewoehnliche Neustarts ohne Wirkung.
+#        Beschreibung: Unterhalb dieser Ausfallzeit wird beim Start nicht
+#                      verschoben. Damit bleiben gewoehnliche Neustarts ohne
+#                      Wirkung. Geparkte Eintraege erhalten beim Login ihre
+#                      Restzeit unabhaengig von diesem Wert zurueck.
 #        Vorgabe:      60
 #
 
@@ -103,9 +107,11 @@ OfflineRespawnFreeze.MinDowntimeSeconds = 60
 
 #
 #    OfflineRespawnFreeze.MaxDowntimeDays
-#        Beschreibung: Oberhalb dieser Ausfallzeit wird nur protokolliert und
-#                      nichts geaendert. Schutz vor unsinnigen Werten, etwa
-#                      durch eine falsch gestellte Systemuhr.
+#        Beschreibung: Oberhalb dieser Ausfallzeit wird beim Start nur
+#                      protokolliert und nichts geaendert. Schutz vor
+#                      unsinnigen Werten, etwa durch eine falsch gestellte
+#                      Systemuhr. Liegt der Logout laenger zurueck, erscheinen
+#                      geparkte Respawns beim Login sofort.
 #        Vorgabe:      60
 #
 
