@@ -109,6 +109,11 @@ einmal anmelden. Sonst bleiben die geparkten Mobs bis zu einem Jahr aus.
 `FreezeWhileNoPlayerOnline = 0` ist dagegen unkritisch: Der naechste Start gibt
 den geparkten Eintraegen ihre Restzeit zurueck.
 
+Wird eine geparkte Leiche noch gepluendert, kuerzt der Core ihren Zeitpunkt um
+einige Sekunden (`Creature::AllLootRemovedFromCorpse`). Als geparkt gilt daher
+alles, was weiter als `MaxFutureDays` in der Zukunft liegt; die Kuerzung geht
+von der Restzeit ab, genau wie ohne Parken.
+
 Liegt der Logout laenger als `MaxDowntimeDays` zurueck, erscheint beim Login
 alles Geparkte sofort, als waere die Zeit normal gelaufen.
 

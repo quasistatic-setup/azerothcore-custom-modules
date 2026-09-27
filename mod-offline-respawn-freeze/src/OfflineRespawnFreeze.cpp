@@ -176,6 +176,25 @@ namespace
         return res;
     }
 
+    // Untergrenze, ab der ein Wert noch als geparkt gilt. Der Core kuerzt den
+    // Parkwert unter Umstaenden um einige Sekunden: Wird eine Leiche gepluendert,
+    // zieht Creature::AllLootRemovedFromCorpse die beschleunigte Verwesung von
+    // m_respawnTime ab, und dieser Wert landet beim Entfernen der Leiche in der
+    // Tabelle. Alles oberhalb von "Parkzeitpunkt plus MaxFutureDays" stammt
+    // dennoch aus dem Parken; echte Respawns liegen nie so weit in der Zukunft.
+    uint32 ParkedFloor(uint32 parkedTime)
+    {
+        return parkedTime - PARK_SECONDS + g_cfg.maxFutureDays * SECONDS_PER_DAY;
+    }
+
+    // Restzeit nach dem Parken. Was der Core am Parkwert gekuerzt hat, geht
+    // auch von der Restzeit ab, genau wie ohne Parken.
+    uint32 RemainingAfterPark(uint32 remaining, uint32 parkedTime, time_t current)
+    {
+        uint32 const cut = current < static_cast<time_t>(parkedTime) ? static_cast<uint32>(parkedTime - current) : 0;
+        return remaining > cut ? remaining - cut : 0;
+    }
+
     // Setzt geparkte Eintraege auf "jetzt plus Restzeit", ohne geladene Karten.
     // Nur fuer den Start, wenn der Sitzungsanker abgeschaltet wurde.
     void RestoreParkedInDb(uint32 now)
@@ -183,8 +202,9 @@ namespace
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
         trans->Append(
             "UPDATE creature_respawn r JOIN `{}` s ON s.guid = r.guid AND s.instanceId = r.instanceId "
-            "SET r.respawnTime = {} + s.remaining WHERE r.respawnTime = s.parkedTime",
-            SNAPSHOT_TABLE, now);
+            "SET r.respawnTime = {} + GREATEST(CAST(s.remaining AS SIGNED) - GREATEST(CAST(s.parkedTime AS SIGNED) - CAST(r.respawnTime AS SIGNED), 0), 0) "
+            "WHERE r.respawnTime >= s.parkedTime - {} + {}",
+            SNAPSHOT_TABLE, now, PARK_SECONDS, g_cfg.maxFutureDays * SECONDS_PER_DAY);
         trans->Append("DELETE FROM `{}`", SNAPSHOT_TABLE);
         trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
         CharacterDatabase.CommitTransaction(trans);
@@ -479,7 +499,7 @@ private:
         std::string const select = Acore::StringFormat(
             "SELECT r.guid, r.instanceId, r.mapId, r.respawnTime FROM creature_respawn r "
             "WHERE r.respawnTime > {} AND r.respawnTime < {}{} AND NOT EXISTS ("
-            "SELECT 1 FROM `{}` s WHERE s.guid = r.guid AND s.instanceId = r.instanceId AND s.parkedTime = r.respawnTime)",
+            "SELECT 1 FROM `{}` s WHERE s.guid = r.guid AND s.instanceId = r.instanceId)",
             lastSeen, upperBound, InstanceScope("r."), SNAPSHOT_TABLE);
 
         ShiftResult const res = ShiftRespawnTimes(select, shift);
@@ -773,34 +793,47 @@ private:
                 uint32 const remaining  = f[3].Get<uint32>();
                 uint32 const parkedTime = f[4].Get<uint32>();
 
-                uint32 const target = tooLong ? now : now + remaining;
+                uint32 const floor = ParkedFloor(parkedTime);
 
                 if (Map* map = sMapMgr->FindMap(mapId, instanceId))
                 {
-                    if (map->GetCreatureRespawnTime(guid) != static_cast<time_t>(parkedTime))
+                    time_t const current = map->GetCreatureRespawnTime(guid);
+                    if (current < static_cast<time_t>(floor))
                     {
                         ++res.changed;
                         continue;
                     }
 
-                    time_t stored = target;
+                    time_t stored = tooLong ? now : now + RemainingAfterPark(remaining, parkedTime, current);
                     map->SaveCreatureRespawnTime(guid, stored);
 
                     // Tote Kreaturobjekte, auch Leichen, tragen den Parkwert
-                    // selbst. Kreaturen, die Bots seither erlegt haben, tragen
-                    // einen kleineren Wert und bleiben unberuehrt.
+                    // selbst, bei gepluenderten Leichen leicht gekuerzt.
+                    // Kreaturen, die Bots seither erlegt haben, tragen einen
+                    // echten Zeitpunkt und bleiben unberuehrt.
                     auto bounds = map->GetCreatureBySpawnIdStore().equal_range(guid);
                     for (auto itr = bounds.first; itr != bounds.second; ++itr)
-                        if (Creature* creature = itr->second)
-                            if (!creature->IsAlive() && creature->GetRespawnTime() >= static_cast<time_t>(parkedTime))
-                                creature->SetRespawnTime(stored > now ? static_cast<uint32>(stored - now) : 0);
+                    {
+                        Creature* creature = itr->second;
+                        if (!creature || creature->IsAlive() || creature->GetRespawnTime() < static_cast<time_t>(floor))
+                            continue;
+
+                        uint32 const own = tooLong ? 0 : RemainingAfterPark(remaining, parkedTime, creature->GetRespawnTime());
+                        creature->SetRespawnTime(own);
+                    }
 
                     ++res.inMemory;
                 }
+                else if (tooLong)
+                {
+                    trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {} AND respawnTime >= {}",
+                                  now, guid, instanceId, floor);
+                }
                 else
                 {
-                    trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {} AND respawnTime = {}",
-                                  target, guid, instanceId, parkedTime);
+                    trans->Append("UPDATE creature_respawn SET respawnTime = {} + GREATEST({} - GREATEST({} - CAST(respawnTime AS SIGNED), 0), 0) "
+                                  "WHERE guid = {} AND instanceId = {} AND respawnTime >= {}",
+                                  now, static_cast<int64>(remaining), static_cast<int64>(parkedTime), guid, instanceId, floor);
                 }
 
                 ++res.shifted;
