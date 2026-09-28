@@ -1,6 +1,7 @@
 # mod-group-speed
 
-Setzt mit einem Befehl die Geschwindigkeit der ganzen eigenen Gruppe.
+Setzt mit einem Befehl die Geschwindigkeit der ganzen eigenen Gruppe und
+lässt Geister dreimal so schnell laufen.
 
 ```
 .group speed 2     doppelte Geschwindigkeit
@@ -24,6 +25,17 @@ den Aufrufer und Playerbots eingeschlossen, gilt dasselbe wie bei
 Das WoW-Target spielt keine Rolle. Ohne Gruppe gibt es eine Fehlermeldung und
 keine Änderung. Die Rückmeldung ist eine Zeile, etwa
 `Group speed set to 2.00 for 4 members; 1 member skipped: Hunt (in flight).`
+
+## Geistgeschwindigkeit
+
+Ein AuraScript auf die Geist-Aura 8326 (`src/GhostSpeed.cpp`) hebt deren
+Bonus von +50 % auf +200 % Lauf- und Schwimmgeschwindigkeit: Der Geist läuft
+dreimal so schnell wie normal. Das gilt für alle Spieler und Playerbots, auch
+nach Relog oder Teleport als Geist, weil der Wert Teil der Aura ist und nicht
+wie `.group speed` beim nächsten Neuberechnen verloren geht. Die Nachtelfen-Aura
+20584 (+75 %) stapelt nicht, es zählt der höhere Wert.
+`data/sql/db-world/mod_group_speed_ghost.sql` bindet das Skript über
+`spell_script_names` an die Aura.
 
 ## Berechtigung
 
