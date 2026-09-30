@@ -1,0 +1,25 @@
+# Editor, patch and backup leftovers
+*.orig
+*.rej
+*.bak
+*.bak-*
+*.swp
+*~
+.DS_Store
+.vscode/
+.idea/
+
+# Build output, local configuration and runtime data never belong here
+build/
+*.conf
+*.log
+*.sql.gz
+*.tar.gz
+.env
+.env.*
+.secrets/
+
+# Agent notes stay local
+AGENTS.md
+CLAUDE.md
+.claude/
