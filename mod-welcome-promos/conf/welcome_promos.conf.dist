@@ -1,0 +1,84 @@
+[worldserver]
+
+########################################
+# mod-welcome-promos
+#
+# Schickt jedem NEU erstellten Charakter einmalig eine Willkommensmail mit
+# historischen Aktions- und Sondergegenstaenden.
+#
+# Ausgeloest wird ausschliesslich bei der Charaktererstellung, nicht beim
+# Anmelden. Bereits vorhandene Charaktere erhalten daher nichts, auch nicht
+# nachtraeglich. Ein erneutes Anmelden erzeugt keine weitere Mail.
+#
+# Die Belohnungen der Sammleredition laufen unveraendert ueber die
+# Kontokennzeichen des Cores und werden hier nicht wiederholt.
+########################################
+
+#
+#    WelcomePromos.Enable
+#        Beschreibung: Modul ein- oder ausschalten.
+#        Vorgabe:      1
+#
+
+WelcomePromos.Enable = 1
+
+#
+#    WelcomePromos.Items
+#        Beschreibung: Gegenstandsnummern der Anhaenge, durch Komma getrennt.
+#                      Nicht vorhandene Nummern werden uebersprungen und
+#                      protokolliert, doppelte nur einmal verschickt.
+#                      Ein Brief fasst hoechstens zwoelf Anhaenge; bei mehr
+#                      Gegenstaenden wird automatisch aufgeteilt.
+#
+#                      Vorgabe entspricht:
+#                        20371 Blue Murloc Egg (Murky)
+#                        39656 Tyrael's Hilt
+#                        43599 Big Blizzard Bear
+#                        46767 Warbot Ignition Key
+#                        46802 Heavy Murloc Egg (Grunty)
+#                        49362 Onyxian Whelpling
+#                        49646 Core Hound Pup
+#                        49665 Pandaren Monk
+#                        49693 Lil' Phylactery (Lil' K.T.)
+#                        54847 Lil' XT
+#
+
+WelcomePromos.Items = "20371,39656,43599,46767,46802,49362,49646,49665,49693,54847"
+
+#
+#    WelcomePromos.SenderEntry
+#        Beschreibung: Nummer aus creature_template als Absender.
+#                      0 verschickt als Spielleiter-Nachricht; im Postfach
+#                      erscheint dann der Betreff ohne Kreaturennamen.
+#        Vorgabe:      0
+#
+
+WelcomePromos.SenderEntry = 0
+
+#
+#    WelcomePromos.Subject
+#        Beschreibung: Betreff der Mail. Bei mehreren Briefen wird eine
+#                      Zaehlung angehaengt, etwa "(1/2)".
+#        Vorgabe:      "Besondere Erinnerungsstuecke"
+#
+
+WelcomePromos.Subject = "Besondere Erinnerungsstuecke"
+
+#
+#    WelcomePromos.Body
+#        Beschreibung: Text der Mail.
+#
+
+WelcomePromos.Body = "Willkommen in Azeroth! Im Anhang findest du einige besondere Erinnerungsstuecke aus vergangenen Aktionen. Moegen sie dich auf deinen Reisen begleiten."
+
+#
+#    WelcomePromos.ExcludedAccountPrefixes
+#        Beschreibung: Zusaetzliche Kontopraefixe, die keine Mail erhalten,
+#                      durch Komma getrennt. Gross- und Kleinschreibung egal.
+#                      Der Praefix der Playerbot-Konten wird ohnehin immer
+#                      ausgenommen; er wird aus AiPlayerbot.RandomBotAccountPrefix
+#                      gelesen, damit beide Seiten nicht auseinanderlaufen.
+#        Vorgabe:      "" (keine weiteren)
+#
+
+WelcomePromos.ExcludedAccountPrefixes = ""
