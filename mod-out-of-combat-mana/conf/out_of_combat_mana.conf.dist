@@ -1,0 +1,34 @@
+[worldserver]
+
+########################################
+# mod-out-of-combat-mana
+#
+# Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des
+# Kampfes. Gilt für echte Spieler und für Bots in einer Gruppe oder einem
+# Raid mit einem echten Spieler; frei laufende RandomBots bleiben normal.
+#
+# Unverändert bleiben Rate.Mana der worldserver.conf, die Regeneration im
+# Kampf, Wut, Energie, Runenmacht sowie Begleiter, Wächter und Kreaturen.
+# Die Fünf-Sekunden-Regel bleibt wirksam: Nach einem Zauber wird der
+# unterbrochene Regenerationswert vervielfacht, nicht der volle.
+########################################
+
+#
+#    OutOfCombatMana.Enable
+#        Beschreibung: Modul ein- oder ausschalten.
+#        Vorgabe:      1
+#
+
+OutOfCombatMana.Enable = 1
+
+#
+#    OutOfCombatMana.Multiplier
+#        Beschreibung: Faktor auf die Mana-Regeneration, die der Core außerhalb
+#                      des Kampfes ohnehin berechnet (einschließlich Rate.Mana).
+#                      1.0 entspricht genau dem Verhalten ohne Modul. Werte
+#                      unter 1 gelten als ungültig und wirken wie 1.0.
+#        Beispiel:     2.0 verdoppelt die Regeneration außerhalb des Kampfes.
+#        Vorgabe:      2.0
+#
+
+OutOfCombatMana.Multiplier = 2.0
