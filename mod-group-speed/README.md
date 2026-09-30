@@ -1,53 +1,61 @@
 # mod-group-speed
 
-Setzt mit einem Befehl die Geschwindigkeit der ganzen eigenen Gruppe und
-lässt Geister dreimal so schnell laufen.
+mod-group-speed is an AzerothCore WotLK module that adds a group movement speed command.
+`.group speed <rate>` sets the speed of your whole party or raid in one step, and
+ghosts run three times as fast as normal.
 
 ```
-.group speed 2     doppelte Geschwindigkeit
+.group speed 2     double speed
 .group speed 1     normal
 ```
 
-## Verhalten
+## Behaviour
 
-Für jedes online befindliche Mitglied der Party oder des Raids des Aufrufers,
-den Aufrufer und Playerbots eingeschlossen, gilt dasselbe wie bei
-`.modify speed all` für einen ausgewählten Spieler:
+For every online member of the caller's party or raid, the caller and Playerbots
+included, the command does the same as `.modify speed all` on a selected player:
 
-| Punkt | Wert |
+| Aspect | Value |
 |---|---|
-| Bewegungsarten | walk, run, swim, flight über `SetSpeed(..., true)` |
-| Grenzen | 0.1 bis 50, sonst `Incorrect values.` |
-| Übersprungen | Mitglieder im Taxiflug, Mitglieder mit höherer Kontostufe, Mitglieder im Ladebildschirm |
-| Nicht betroffen | Begleiter, NPCs, Spieler außerhalb der Gruppe, Offline-Mitglieder |
-| Dauer | bis zum Logout, wie `.modify speed all` |
+| Movement types | walk, run, swim, flight via `SetSpeed(..., true)` |
+| Limits | 0.1 to 50, otherwise `Incorrect values.` |
+| Skipped | members on a taxi flight, members with a higher account level, members still loading |
+| Not affected | pets, NPCs, players outside the group, offline members |
+| Duration | until logout, like `.modify speed all` |
 
-Das WoW-Target spielt keine Rolle. Ohne Gruppe gibt es eine Fehlermeldung und
-keine Änderung. Die Rückmeldung ist eine Zeile, etwa
+The current target does not matter. Without a group the command reports an error
+and changes nothing. The reply is a single line, for example
 `Group speed set to 2.00 for 4 members; 1 member skipped: Hunt (in flight).`
 
-## Geistgeschwindigkeit
+## Ghost speed
 
-Ein AuraScript auf die Geist-Aura 8326 (`src/GhostSpeed.cpp`) hebt deren
-Bonus von +50 % auf +200 % Lauf- und Schwimmgeschwindigkeit: Der Geist läuft
-dreimal so schnell wie normal. Das gilt für alle Spieler und Playerbots, auch
-nach Relog oder Teleport als Geist, weil der Wert Teil der Aura ist und nicht
-wie `.group speed` beim nächsten Neuberechnen verloren geht. Die Nachtelfen-Aura
-20584 (+75 %) stapelt nicht, es zählt der höhere Wert.
-`data/sql/db-world/mod_group_speed_ghost.sql` bindet das Skript über
-`spell_script_names` an die Aura.
+An AuraScript on the ghost aura 8326 (`src/GhostSpeed.cpp`) raises its bonus from
++50 % to +200 % run and swim speed, so ghosts run three times as fast as normal.
+This applies to all players and Playerbots, also after relogging or teleporting as
+a ghost, because the value is part of the aura and is not lost on the next speed
+recalculation like `.group speed`. The Night Elf aura 20584 (+75 %) does not
+stack; the higher value wins. `data/sql/db-world/mod_group_speed_ghost.sql` binds
+the script to the aura through `spell_script_names`.
 
-## Berechtigung
+## Permission
 
-Registriert mit `RBAC_PERM_COMMAND_MODIFY_SPEED_ALL`, wie `.modify speed all`.
-Wirksam ist, wie bei jedem Befehl, die Stufe aus `acore_world.command`.
-`data/sql/db-world/mod_group_speed_command.sql` legt die Zeile
-`group speed` mit der Stufe von `modify speed all` an (derzeit 2).
+The command is registered with `RBAC_PERM_COMMAND_MODIFY_SPEED_ALL`, like
+`.modify speed all`. As for every command, the effective level comes from
+`acore_world.command`. `data/sql/db-world/mod_group_speed_command.sql` creates the
+row `group speed` with the level of `modify speed all` (2 by default). If you later
+change that level, adjust `group speed` as well.
 
-## Warum ein Modul
+## Why a module
 
-AzerothCore führt die Befehlstabellen aller `CommandScript`s über den Namen
-zusammen. `speed` hängt sich so unter das vorhandene `.group`, ohne
-`cs_group.cpp` zu verändern; ein Core-Update überschreibt den Befehl nicht.
-Ein neues Modul braucht einmalig einen CMake-Lauf, weil die Modulliste beim
-Konfigurieren festgelegt wird.
+AzerothCore merges the command tables of all `CommandScript`s by name, so `speed`
+attaches below the existing `.group` without touching `cs_group.cpp`, and core
+updates do not overwrite it. There is no configuration file.
+
+## Installation
+
+Link or copy this folder to `azerothcore-wotlk/modules/mod-group-speed`, re-run
+CMake, build and install. The SQL files are applied by the database updater on the
+next start. See the [repository README](../README.md#installation).
+
+## License
+
+MIT, see [LICENSE](../LICENSE).

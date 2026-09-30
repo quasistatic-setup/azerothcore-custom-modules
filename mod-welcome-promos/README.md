@@ -1,57 +1,74 @@
 # mod-welcome-promos
 
-Schickt jedem neu erstellten Charakter einmalig eine Willkommensmail mit
-historischen Aktions- und Sondergegenstaenden.
+mod-welcome-promos is an AzerothCore WotLK module for a configurable welcome mail with promotional rewards.
+Every newly created character receives, exactly once, a mail with historical
+promotional and special items such as rare pets and mounts.
 
-## Warum ein Modul
+## Why a module
 
-AzerothCore bringt mit `mail_server_template` bereits ein Serverpostsystem mit.
-Es stellt allerdings bei **jedem Anmelden** zu und vermerkt den Charakter
-anschliessend in `mail_server_character`. Auf einem Server mit Playerbots
-betrifft das saemtliche Bot-Charaktere. Bei rund 1500 Bots gegenueber zwei
-echten Charakteren entstuenden zehntausende Gegenstaende in Bot-Postfaechern,
-und jeder neu angelegte Bot bekaeme laufend weitere.
+AzerothCore already ships a server mail system, `mail_server_template`. It delivers
+on **every login** and records the character in `mail_server_character`
+afterwards. On a server with Playerbots this hits every bot character: thousands of
+bots would mean tens of thousands of items in bot mailboxes, and every newly
+created bot would keep receiving more.
 
-`OnPlayerCreate` loest dagegen nur bei tatsaechlicher Neuerstellung aus.
-Bestehende Charaktere bleiben dadurch unberuehrt, ohne dass man sie vorher
-irgendwo eintragen muesste.
+`OnPlayerCreate` only fires when a character is actually created. Existing
+characters are left alone without having to register them anywhere first.
 
-## Arbeitsweise
+## How it works
 
-| Zeitpunkt | Hook | Vorgang |
+| When | Hook | Action |
 |---|---|---|
-| Serverstart | `OnBeforeWorldInitialized` | legt die Merktabelle an |
-| Charaktererstellung | `OnPlayerCreate` | prueft, verschickt, vermerkt |
-| endgueltige Charakterloeschung | `OnPlayerDeleteFromDB` | entfernt die Versandmarke |
+| Server start | `OnBeforeWorldInitialized` | creates the tracking table |
+| Character creation | `OnPlayerCreate` | checks, sends, records |
+| Permanent character deletion | `OnPlayerDeleteFromDB` | removes the delivery marker |
 
-Der Hook wird im Core aufgerufen, nachdem die Charaktererstellung erfolgreich
-festgeschrieben wurde. Der Charakter steht zu diesem Zeitpunkt in der
-Datenbank, der Mailversand ist also sicher.
+The core calls the hook after the character creation has been committed, so the
+character exists in the database and sending mail is safe.
 
-Ausgenommen sind Bot-Konten. Der Praefix wird aus
-`AiPlayerbot.RandomBotAccountPrefix` gelesen, damit beide Seiten nicht
-auseinanderlaufen; weitere Praefixe lassen sich konfigurieren.
+Bot accounts are excluded. The prefix is read from
+`AiPlayerbot.RandomBotAccountPrefix` so both sides cannot drift apart (default
+`rndbot` when mod-playerbots is not installed); further prefixes can be configured.
 
-## Einmaligkeit
+## Sent only once
 
-Zweifach abgesichert: `OnPlayerCreate` feuert je Charakter genau einmal, und
-zusaetzlich wird jeder belieferte Charakter in `mod_welcome_promos_sent`
-vermerkt. Ein erneutes Anmelden erzeugt keine weitere Mail.
+Two safeguards: `OnPlayerCreate` fires exactly once per character, and every
+character that received the mail is recorded in `mod_welcome_promos_sent` in the
+characters database. Logging in again does not send another mail.
 
-Bei einer endgueltigen Charakterloeschung wird die Versandmarke innerhalb
-derselben Datenbanktransaktion entfernt. Falls der Core die freigewordene GUID
-spaeter erneut vergibt, kann der neue Charakter die Mail dadurch erhalten.
+When a character is deleted permanently, its marker is removed in the same database
+transaction. If the core later reuses the freed GUID, the new character can receive
+the mail.
 
-## Verhaeltnis zur Sammleredition
+## Collector's Edition rewards
 
-Die Belohnungen der Sammleredition laufen unveraendert ueber die
-Kontokennzeichen des Cores. Es gibt keine Ueberschneidung: Jene verwenden
-andere Gegenstandsnummern (13582 Zergling Leash, 13583 Panda Collar,
-13584 Diablo Stone), dieses Modul verschickt sie nicht.
+Collector's Edition rewards keep working through the core's account flags. There is
+no overlap: they use different item IDs (13582 Zergling Leash, 13583 Panda Collar,
+13584 Diablo Stone), and this module does not send them.
 
-## Einstellungen
+## Configuration
 
-Siehe `conf/welcome_promos.conf.dist`. Gegenstaende, Absender, Betreff und
-Text sind frei konfigurierbar. Nicht vorhandene Gegenstandsnummern werden
-uebersprungen und protokolliert, statt die Mail stillschweigend unvollstaendig
-zu verschicken.
+`conf/welcome_promos.conf.dist`, installed to `etc/modules/`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `WelcomePromos.Enable` | `1` | Turn the module on or off |
+| `WelcomePromos.Items` | ten promo pets and mounts | Comma-separated item IDs. Unknown IDs are skipped and logged, duplicates sent once; more than twelve items are split across several mails |
+| `WelcomePromos.SenderEntry` | `0` | `creature_template` entry used as sender; `0` sends as a game master mail |
+| `WelcomePromos.Subject` | German text | Mail subject; with several mails a counter such as `(1/2)` is appended |
+| `WelcomePromos.Body` | German text | Mail text |
+| `WelcomePromos.ExcludedAccountPrefixes` | empty | Additional account prefixes that never receive the mail, case-insensitive |
+
+The default items are 20371 Blue Murloc Egg, 39656 Tyrael's Hilt, 43599 Big
+Blizzard Bear, 46767 Warbot Ignition Key, 46802 Heavy Murloc Egg, 49362 Onyxian
+Whelpling, 49646 Core Hound Pup, 49665 Pandaren Monk, 49693 Lil' Phylactery and
+54847 Lil' XT.
+
+## Installation
+
+Link or copy this folder to `azerothcore-wotlk/modules/mod-welcome-promos`, re-run
+CMake, build and install. See the [repository README](../README.md#installation).
+
+## License
+
+MIT, see [LICENSE](../LICENSE).

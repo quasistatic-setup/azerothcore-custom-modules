@@ -1,39 +1,60 @@
 # mod-out-of-combat-mana
 
-Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des Kampfes
-um `OutOfCombatMana.Multiplier`. Gilt für echte Spieler und für Bots in einer
-Gruppe oder einem Raid mit einem echten Spieler; frei laufende RandomBots
-bleiben normal. Umgesetzt über den Hook `PlayerScript::OnPlayerUpdate`, ohne
-Core-Patch. Schalter und Faktor stehen in `out_of_combat_mana.conf`.
+mod-out-of-combat-mana is an AzerothCore WotLK module for configurable out-of-combat mana regeneration.
+It multiplies the normal mana regeneration of players outside of combat by
+`OutOfCombatMana.Multiplier`, with Player and Playerbot support: real players and
+bots in a group or raid with a real player get the bonus, free-roaming random bots
+stay normal. It works through the `PlayerScript::OnPlayerUpdate` hook, without a
+core patch.
 
-## Wirkung
+## Behaviour
 
-- Faktor auf das, was der Core ohnehin gibt, einschließlich `Rate.Mana` und
-  der optionalen Anhebung unter Stufe 15. Beispiel mit `Rate.Mana = 1.5` und
-  Faktor 2: außerhalb des Kampfes das Doppelte der normalen Regeneration,
-  im Kampf unverändert. Faktor 1 entspricht genau dem Verhalten ohne Modul.
-- Die Fünf-Sekunden-Regel bleibt: Nach einem Manaverbrauch vervielfacht das
-  Modul den unterbrochenen Regenerationswert, wie ihn der Core gerade nutzt.
-  Ist er 0, kommt auch nichts hinzu. Auren, die Mana-Regeneration
-  verhindern, und `.cheat power` wirken wie im Core.
-- Unverändert bleiben `Rate.Mana`, Wut, Energie, Runenmacht sowie Begleiter,
-  Wächter und Kreaturen.
-- Bots erkennt das Modul an `WorldSession::IsBot()`, ohne Playerbots-Header.
-  Selfbots zählen als echte Spieler. Ein Bot erhält den Bonus, solange ein
-  echter Spieler online in seiner Gruppe oder seinem Raid ist; geprüft wird
-  höchstens einmal je Sekunde. Im Schlachtfeld zählt die eigentliche Gruppe,
-  nicht der Schlachtfeld-Raid.
-- `.reload config` übernimmt Schalter und Faktor; das Serverlog meldet den
-  Zustand beim Start und nach jedem Reload.
+- The factor applies to what the core already grants, including `Rate.Mana` and
+  the optional low-level boost below level 15. Example with `Rate.Mana = 1.5` and
+  multiplier 2: out of combat twice the normal regeneration, in combat unchanged.
+  Multiplier 1 is exactly the behaviour without the module.
+- The five-second rule stays: after spending mana the module multiplies the
+  interrupted regeneration value the core is currently using. If that is 0, nothing
+  is added. Auras that prevent mana regeneration and `.cheat power` behave as in
+  the core.
+- Unchanged: `Rate.Mana`, rage, energy, runic power, as well as pets, guardians and
+  creatures.
+- Bots are recognised through `WorldSession::IsBot()`, without Playerbot headers.
+  Selfbots count as real players. A bot gets the bonus while a real player is
+  online in its group or raid; this is checked at most once per second. In
+  battlegrounds the original group counts, not the battleground raid.
+- `.reload config` applies switch and multiplier; the server log reports the state
+  at startup and after every reload.
 
-## Umsetzung
+## Configuration
 
-Der Core ruft `OnPlayerUpdate` in `Player::Update` unmittelbar vor der
-Regeneration auf und rechnet Mana dort in jedem Schritt mit genau dessen
-Dauer. Das Modul rechnet im selben Schritt mit derselben Formel den Anteil
-über 1 und führt einen eigenen Bruchteil je Spieler in dessen `CustomData`.
-Ganze Punkte schreibt es wie der Core nur als Feldänderung; ein eigenes
-`SMSG_POWER_UPDATE` sendet es nur beim Erreichen des Maximums.
+`conf/out_of_combat_mana.conf.dist`, installed to `etc/modules/`:
 
-`src/OutOfCombatManaLogic.h` enthält die Rechenlogik ohne
-Core-Abhängigkeiten; `tests/run_logic_test.sh` prüft sie ohne Server.
+| Setting | Default | Meaning |
+|---|---|---|
+| `OutOfCombatMana.Enable` | `1` | Turn the module on or off |
+| `OutOfCombatMana.Multiplier` | `2.0` | Factor on the out-of-combat mana regeneration the core computes (including `Rate.Mana`). Values below 1 are invalid and act like 1.0 |
+
+## How it works
+
+The core calls `OnPlayerUpdate` in `Player::Update` right before regeneration and
+computes mana there in every step with exactly that step's duration. The module
+uses the same state and formula in the same step to add the share above 1, and
+keeps its own per-player fraction in `CustomData`. Whole points are written as a
+field update like the core does; a separate `SMSG_POWER_UPDATE` is only sent when
+mana reaches its maximum.
+
+## Installation
+
+Link or copy this folder to `azerothcore-wotlk/modules/mod-out-of-combat-mana`,
+re-run CMake, build and install. See the
+[repository README](../README.md#installation).
+
+## Tests
+
+`src/OutOfCombatManaLogic.h` holds the calculation without core dependencies;
+`tests/run_logic_test.sh` checks it without a server (needs `g++` with C++20).
+
+## License
+
+MIT, see [LICENSE](../LICENSE).
