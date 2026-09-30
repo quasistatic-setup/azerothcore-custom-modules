@@ -1,8 +1,9 @@
 # mod-out-of-combat-mana
 
 Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des Kampfes
-um `OutOfCombatMana.Multiplier`. Gilt für jedes `Player`-Objekt, also auch für
-Playerbots. Umgesetzt über den Hook `PlayerScript::OnPlayerUpdate`, ohne
+um `OutOfCombatMana.Multiplier`. Gilt für echte Spieler und für Bots in einer
+Gruppe oder einem Raid mit einem echten Spieler; frei laufende RandomBots
+bleiben normal. Umgesetzt über den Hook `PlayerScript::OnPlayerUpdate`, ohne
 Core-Patch. Schalter und Faktor stehen in `out_of_combat_mana.conf`.
 
 ## Wirkung
@@ -17,6 +18,11 @@ Core-Patch. Schalter und Faktor stehen in `out_of_combat_mana.conf`.
   verhindern, und `.cheat power` wirken wie im Core.
 - Unverändert bleiben `Rate.Mana`, Wut, Energie, Runenmacht sowie Begleiter,
   Wächter und Kreaturen.
+- Bots erkennt das Modul an `WorldSession::IsBot()`, ohne Playerbots-Header.
+  Selfbots zählen als echte Spieler. Ein Bot erhält den Bonus, solange ein
+  echter Spieler online in seiner Gruppe oder seinem Raid ist; geprüft wird
+  höchstens einmal je Sekunde. Im Schlachtfeld zählt die eigentliche Gruppe,
+  nicht der Schlachtfeld-Raid.
 - `.reload config` übernimmt Schalter und Faktor; das Serverlog meldet den
   Zustand beim Start und nach jedem Reload.
 

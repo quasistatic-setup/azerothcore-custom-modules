@@ -38,6 +38,12 @@ int main()
     assert(IsValidMultiplier(1.0f) && IsValidMultiplier(2.0f));
     assert(!IsValidMultiplier(0.5f) && !IsValidMultiplier(NAN) && !IsValidMultiplier(INFINITY));
 
+    // Wer den Bonus erhält
+    assert(Applies(false, false));                      // echter Spieler, allein
+    assert(Applies(false, true));
+    assert(Applies(true, true));                        // Bot mit echtem Spieler in Gruppe oder Raid
+    assert(!Applies(true, false));                      // RandomBot ohne echten Spieler
+
     // Rate wie im Core, mit und ohne Anhebung für niedrige Stufen
     assert(eq(ManaRate(1.5f, false, 10), 1.5f));
     assert(eq(ManaRate(1.5f, true, 80), 1.5f));

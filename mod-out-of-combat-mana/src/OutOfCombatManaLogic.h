@@ -17,6 +17,16 @@ namespace OutOfCombatMana
         return std::isfinite(multiplier) && multiplier >= 1.0f;
     }
 
+    // So oft prüft das Modul je Bot, ob ein echter Spieler in seiner Gruppe ist.
+    constexpr uint32_t BOT_RECHECK_MS = 1000;
+
+    // Echte Spieler immer; Bots nur, wenn ein echter Spieler in ihrer Gruppe
+    // oder ihrem Raid ist. Frei laufende RandomBots bleiben unverändert.
+    inline bool Applies(bool isBot, bool groupHasRealPlayer)
+    {
+        return !isBot || groupHasRealPlayer;
+    }
+
     // Rate wie in Player::Regenerate(POWER_MANA): Rate.Mana, unter Stufe 15
     // mit der optionalen Anhebung aus PlayerStart.LowLevelRegenBoost.
     inline float ManaRate(float rateMana, bool lowLevelBoost, uint32_t level)

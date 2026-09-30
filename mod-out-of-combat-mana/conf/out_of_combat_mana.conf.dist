@@ -4,7 +4,8 @@
 # mod-out-of-combat-mana
 #
 # Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des
-# Kampfes. Gilt für alle Player-Objekte, also auch für Playerbots.
+# Kampfes. Gilt für echte Spieler und für Bots in einer Gruppe oder einem
+# Raid mit einem echten Spieler; frei laufende RandomBots bleiben normal.
 #
 # Unverändert bleiben Rate.Mana der worldserver.conf, die Regeneration im
 # Kampf, Wut, Energie, Runenmacht sowie Begleiter, Wächter und Kreaturen.

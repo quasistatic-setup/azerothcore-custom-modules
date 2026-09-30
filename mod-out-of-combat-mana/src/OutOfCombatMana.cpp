@@ -2,9 +2,15 @@
  * mod-out-of-combat-mana
  *
  * Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des
- * Kampfes um OutOfCombatMana.Multiplier. Gilt für jedes Player-Objekt, also
- * auch für Playerbots. Rate.Mana, Wut, Energie, Runenmacht, Begleiter und
- * Kreaturen bleiben unverändert.
+ * Kampfes um OutOfCombatMana.Multiplier. Gilt für echte Spieler und für Bots
+ * in einer Gruppe oder einem Raid mit einem echten Spieler; frei laufende
+ * RandomBots bleiben unverändert. Rate.Mana, Wut, Energie, Runenmacht,
+ * Begleiter und Kreaturen bleiben ebenfalls unverändert.
+ *
+ * Bots erkennt das Modul an WorldSession::IsBot(), das mod-playerbots für
+ * seine Sitzungen setzt; Selfbots laufen über die Client-Sitzung und zählen
+ * als echte Spieler. So braucht das Modul keine Playerbots-Header. Im
+ * Schlachtfeld zählt die eigentliche Gruppe, nicht der Schlachtfeld-Raid.
  *
  * Warum dieser Hook: Der Core hat keinen Hook in Player::Regenerate. Er ruft
  * in Player::Update aber OnPlayerUpdate unmittelbar vor
@@ -19,20 +25,25 @@
  * Regel nicht. Auren, die Mana-Regeneration verhindern, gelten ebenso.
  *
  * Kosten: Die Konfiguration liegt atomar vor, weil Map-Threads parallel
- * laufen. Der Bruchteil je Spieler liegt in dessen CustomData und wird nur
- * vom eigenen Map-Thread berührt, daher ohne Sperre. Ganze Punkte schreibt
+ * laufen. Bruchteil und Gruppenergebnis je Spieler liegen in dessen
+ * CustomData und werden nur vom eigenen Map-Thread berührt, daher ohne
+ * Sperre. Bots ohne Gruppe scheiden vor jedem Nachschlagen aus; die Gruppe
+ * eines Bots wird höchstens einmal je Sekunde durchsucht. Ganze Punkte schreibt
  * das Modul wie der Core als Feldänderung ohne eigenes SMSG_POWER_UPDATE;
  * das Paket kommt mit dem 2-Sekunden-Takt des Cores oder beim Erreichen des
  * Maximums.
  */
 
 #include "Config.h"
+#include "GameTime.h"
+#include "Group.h"
 #include "Log.h"
 #include "Player.h"
 #include "PlayerScript.h"
 #include "ScriptMgr.h"
 #include "World.h"
 #include "WorldScript.h"
+#include "WorldSession.h"
 #include "OutOfCombatManaLogic.h"
 
 #include <atomic>
@@ -43,12 +54,29 @@ namespace
     std::atomic<bool> g_enabled{true};
     std::atomic<float> g_multiplier{2.0f};
 
-    std::string const FRACTION_KEY = "mod-out-of-combat-mana";
+    std::string const STATE_KEY = "mod-out-of-combat-mana";
 
-    struct ManaFraction : public DataMap::Base
+    struct ManaState : public DataMap::Base
     {
-        float value = 0.0f;
+        float fraction = 0.0f;
+        bool botApplies = false;
+        Milliseconds nextBotCheck{0};
     };
+
+    Group* RelevantGroup(Player* player)
+    {
+        return player->InBattleground() ? player->GetOriginalGroup() : player->GetGroup();
+    }
+
+    bool GroupHasRealPlayer(Group* group)
+    {
+        for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
+            if (Player* member = ref->GetSource())
+                if (WorldSession* session = member->GetSession(); session && !session->IsBot())
+                    return true;
+
+        return false;
+    }
 
     void LoadConfig()
     {
@@ -57,7 +85,8 @@ namespace
 
         if (!OutOfCombatMana::IsValidMultiplier(multiplier))
         {
-            LOG_ERROR("module", "[OutOfCombatMana] OutOfCombatMana.Multiplier = {} ist ungültig (mindestens 1). Die Mana-Regeneration bleibt unverändert.", multiplier);
+            LOG_ERROR("module", "[OutOfCombatMana] OutOfCombatMana.Multiplier = {} ist ungültig (mindestens 1). "
+                "Die Mana-Regeneration bleibt unverändert.", multiplier);
             multiplier = 1.0f;
         }
 
@@ -67,7 +96,8 @@ namespace
         if (!enabled)
             LOG_INFO("module", "[OutOfCombatMana] Abgeschaltet.");
         else
-            LOG_INFO("module", "[OutOfCombatMana] Aktiv: Mana-Regeneration außerhalb des Kampfes mit Faktor {}.", multiplier);
+            LOG_INFO("module", "[OutOfCombatMana] Aktiv: Mana-Regeneration außerhalb des Kampfes mit Faktor {}. "
+                "Gilt für Spieler und Bots in deren Gruppen.", multiplier);
     }
 }
 
@@ -128,14 +158,35 @@ public:
         if (bonus <= 0.0f)
             return;
 
-        ManaFraction* fraction = player->CustomData.GetDefault<ManaFraction>(FRACTION_KEY);
-        uint32 whole = OutOfCombatMana::TakeWhole(fraction->value, bonus);
+        // Bots ohne Gruppe (die meisten RandomBots) scheiden aus, bevor
+        // CustomData nachgeschlagen wird.
+        bool isBot = player->GetSession()->IsBot();
+        Group* group = isBot ? RelevantGroup(player) : nullptr;
+        if (isBot && !group)
+            return;
+
+        ManaState* state = player->CustomData.GetDefault<ManaState>(STATE_KEY);
+
+        if (isBot)
+        {
+            Milliseconds now = GameTime::GetGameTimeMS();
+            if (now >= state->nextBotCheck)
+            {
+                state->botApplies = OutOfCombatMana::Applies(true, GroupHasRealPlayer(group));
+                state->nextBotCheck = now + Milliseconds(OutOfCombatMana::BOT_RECHECK_MS);
+            }
+
+            if (!state->botApplies)
+                return;
+        }
+
+        uint32 whole = OutOfCombatMana::TakeWhole(state->fraction, bonus);
         if (!whole)
             return;
 
         uint32 newMana = maxMana - curMana > whole ? curMana + whole : maxMana;
         if (newMana == maxMana)
-            fraction->value = 0.0f;
+            state->fraction = 0.0f;
 
         // Wie Player::Regenerate: Zwischenstände nur als Feldänderung, das
         // Paket erst beim Maximum.
