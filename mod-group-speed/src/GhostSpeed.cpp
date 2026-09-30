@@ -1,18 +1,18 @@
 /*
- * mod-group-speed: Geistgeschwindigkeit
+ * mod-group-speed: ghost speed
  *
- * Die Geist-Aura 8326 bringt laut Spell.dbc +50 % Lauf- und
- * Schwimmgeschwindigkeit (Effekt 1 SPELL_AURA_MOD_INCREASE_SPEED, Effekt 2
- * SPELL_AURA_MOD_INCREASE_SWIM_SPEED). Dieses AuraScript setzt beide Werte
- * auf +200 %, der Geist läuft also dreimal so schnell wie normal.
+ * According to Spell.dbc the ghost aura 8326 grants +50 % run and swim speed
+ * (effect 1 SPELL_AURA_MOD_INCREASE_SPEED, effect 2
+ * SPELL_AURA_MOD_INCREASE_SWIM_SPEED). This AuraScript sets both values to
+ * +200 %, so a ghost runs three times as fast as normal.
  *
- * Warum über die Aura: Unit::UpdateSpeed berechnet das Tempo bei jeder
- * Auraänderung neu aus den Auren. Ein direktes SetSpeed (wie .group speed)
- * ginge dabei verloren; der erhöhte Aurawert bleibt dagegen bei Relog,
- * Teleport und weiteren Auren wirksam. Die Nachtelfen-Aura 20584 (+75 %)
- * stapelt nicht mit dem Geist, es zählt der höhere Wert.
+ * Why through the aura: Unit::UpdateSpeed recalculates the speed from the
+ * auras on every aura change. A direct SetSpeed (like .group speed) would be
+ * lost there; the raised aura value stays in effect across relogs, teleports
+ * and further auras. The Night Elf aura 20584 (+75 %) does not stack with the
+ * ghost aura; the higher value wins.
  *
- * Zuordnung zur Aura: data/sql/db-world/mod_group_speed_ghost.sql.
+ * Binding to the aura: data/sql/db-world/mod_group_speed_ghost.sql.
  */
 
 #include "SpellAuraEffects.h"

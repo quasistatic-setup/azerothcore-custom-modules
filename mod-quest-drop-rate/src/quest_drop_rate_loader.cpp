@@ -1,7 +1,7 @@
 /*
- * mod-quest-drop-rate: Einsprungpunkt für den Modul-Lader.
- * Der Funktionsname folgt der AzerothCore-Konvention
- * "Add" + Verzeichnisname mit Unterstrichen + "Scripts".
+ * mod-quest-drop-rate: entry point for the module loader.
+ * The function name follows the AzerothCore convention
+ * "Add" + directory name with underscores + "Scripts".
  */
 
 void AddQuestDropRateScripts();

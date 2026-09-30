@@ -1,23 +1,23 @@
 /*
  * mod-offline-respawn-freeze
  *
- * Haelt die Respawn-Zeit von Kreaturen an, solange niemand spielt.
+ * Pauses creature respawn timers while nobody is playing.
  *
- * Hintergrund: creature_respawn.respawnTime ist eine absolute Unix-Zeit. Ohne
- * Zutun laeuft die Respawnzeit daher auch dann weiter, wenn niemand spielt.
- * Das Modul gleicht zwei Spannen aus:
+ * Background: creature_respawn.respawnTime is an absolute Unix time, so
+ * respawn timers keep running even when nobody plays. The module compensates
+ * two spans:
  *
- *   1. Server aus. Beim Start werden die offenen Zeitpunkte um die Ausfallzeit
- *      nach hinten verschoben.
- *   2. Server laeuft, aber kein menschlicher Spieler ist angemeldet. Beim
- *      Logout werden die offenen Respawns geparkt und ihre Restzeit vermerkt,
- *      beim naechsten Login erhalten sie genau diese Restzeit zurueck. Was die
- *      Bots waehrenddessen erlegen, bleibt unberuehrt und respawnt normal.
+ *   1. Server offline. At startup, pending respawn times are pushed back by
+ *      the downtime.
+ *   2. Server running, but no human player logged in. On logout the pending
+ *      respawns are parked and their remaining time is recorded; on the next
+ *      login they get exactly that remaining time back. Whatever the bots kill
+ *      in the meantime is left alone and respawns normally.
  *
- * GameObjects (Kraeuter, Erz, Truhen) bleiben unberuehrt, ebenso Auktionen,
- * Post, Kalender und die Weltzeit.
+ * GameObjects (herbs, ore, chests) are not touched, nor are auctions, mail,
+ * calendar and world time.
  *
- * Siehe README.md des Moduls fuer die ausfuehrliche Begruendung.
+ * See the module's README.md for the full reasoning.
  */
 
 #include "Config.h"
@@ -45,12 +45,12 @@ namespace
     constexpr char const* SNAPSHOT_TABLE = "mod_offline_respawn_freeze_snapshot";
     constexpr uint32 SECONDS_PER_DAY     = 86400;
 
-    // Parkzeit waehrend der Abwesenheit. Bewusst gleich der Jahresmarkierung,
-    // auf die Map::SaveCreatureRespawnTime in Instanzen mit Reset-Periode ohnehin
-    // kuerzt; so ergibt sich in beiden Faellen derselbe Wert.
+    // Parking time during the absence. Deliberately equal to the one-year marker
+    // that Map::SaveCreatureRespawnTime clamps to in instances with a reset
+    // period anyway, so both cases end up with the same value.
     constexpr uint32 PARK_SECONDS        = 365 * SECONDS_PER_DAY;
 
-    // Schnappschuesse werden in Bloecken geschrieben, nicht Zeile fuer Zeile.
+    // Snapshots are written in chunks, not row by row.
     constexpr std::size_t INSERT_CHUNK   = 500;
 
     struct Settings
@@ -69,12 +69,11 @@ namespace
 
     Settings g_cfg;
 
-    // Formatiert eine Dauer lesbar, damit die Protokollzeilen ohne Kopfrechnen
-    // verstaendlich sind.
+    // Formats a duration readably so log lines need no mental arithmetic.
     std::string HumanDuration(int64 seconds)
     {
         if (seconds < 0)
-            return "negativ";
+            return "negative";
 
         int64 d = seconds / SECONDS_PER_DAY;
         int64 h = (seconds % SECONDS_PER_DAY) / 3600;
@@ -94,7 +93,7 @@ namespace
         return g_cfg.includeInstances ? "" : Acore::StringFormat(" AND {}instanceId = 0", prefix);
     }
 
-    // Schlachtfelder und Arenen werden nach dem Spiel ohnehin verworfen.
+    // Battlegrounds and arenas are discarded after the match anyway.
     bool InScope(Map const* map)
     {
         if (map->IsBattlegroundOrArena())
@@ -103,10 +102,10 @@ namespace
         return g_cfg.includeInstances || map->GetInstanceId() == 0;
     }
 
-    // Langlaeufer laufen nach echter Zeit weiter. Ein seltener Spawn mit 42
-    // Stunden wuerde sonst aus Kalenderzeit Spielzeit machen und bei wenigen
-    // Stunden Spiel am Tag ueber Wochen ausbleiben. Dasselbe gilt fuer
-    // Event-NPCs, deren Ereignis ohnehin nach Kalender laeuft.
+    // Long respawns keep following real time. A rare spawn with 42 hours would
+    // otherwise turn calendar time into play time and stay away for weeks with
+    // a few hours of play per day. The same applies to event NPCs whose event
+    // follows the calendar anyway.
     bool IsLongRunner(uint32 guid)
     {
         if (!g_cfg.maxSpawnTimeSecs)
@@ -116,28 +115,28 @@ namespace
         return data && data->spawntimesecs > g_cfg.maxSpawnTimeSecs;
     }
 
-    // Ergebnis eines Durchgangs, ausschliesslich fuer die Protokollzeile.
+    // Result of one pass, used only for the log line.
     struct ShiftResult
     {
-        uint32 shifted     = 0; // tatsaechlich bearbeitete Eintraege
-        uint32 inMemory    = 0; // davon auf bereits geladenen Karten
-        uint32 skippedLong = 0; // wegen MaxSpawnTimeSecs ausgenommen
-        uint32 changed     = 0; // waehrend der Abwesenheit von aussen veraendert
+        uint32 shifted     = 0; // entries actually processed
+        uint32 inMemory    = 0; // of which on maps already loaded
+        uint32 skippedLong = 0; // excluded by MaxSpawnTimeSecs
+        uint32 changed     = 0; // changed from outside during the absence
     };
 
     std::string SkippedNote(ShiftResult const& res)
     {
         std::string out;
         if (res.skippedLong)
-            out += Acore::StringFormat(", {} Langlaeufer ausgenommen", res.skippedLong);
+            out += Acore::StringFormat(", {} long respawns excluded", res.skippedLong);
         if (res.changed)
-            out += Acore::StringFormat(", {} zwischenzeitlich veraendert", res.changed);
+            out += Acore::StringFormat(", {} changed in the meantime", res.changed);
         return out;
     }
 
-    // Startpfad. Beim Start ist noch keine Karte erzeugt, daher rein ueber die
-    // Datenbank. Der Aufrufer liefert ein SELECT mit den Spalten guid,
-    // instanceId, mapId, respawnTime.
+    // Startup path. No map exists yet at startup, so this works on the database
+    // only. The caller passes a SELECT with the columns guid, instanceId,
+    // mapId, respawnTime.
     ShiftResult ShiftRespawnTimes(std::string const& select, int64 shift)
     {
         ShiftResult res;
@@ -176,27 +175,27 @@ namespace
         return res;
     }
 
-    // Untergrenze, ab der ein Wert noch als geparkt gilt. Der Core kuerzt den
-    // Parkwert unter Umstaenden um einige Sekunden: Wird eine Leiche gepluendert,
-    // zieht Creature::AllLootRemovedFromCorpse die beschleunigte Verwesung von
-    // m_respawnTime ab, und dieser Wert landet beim Entfernen der Leiche in der
-    // Tabelle. Alles oberhalb von "Parkzeitpunkt plus MaxFutureDays" stammt
-    // dennoch aus dem Parken; echte Respawns liegen nie so weit in der Zukunft.
+    // Lower bound above which a value still counts as parked. The core may
+    // shorten the parked value by a few seconds: when a corpse is looted,
+    // Creature::AllLootRemovedFromCorpse subtracts the faster decay from
+    // m_respawnTime, and that value reaches the table when the corpse is
+    // removed. Anything above "parking time plus MaxFutureDays" still comes from
+    // parking; real respawns never lie that far in the future.
     uint32 ParkedFloor(uint32 parkedTime)
     {
         return parkedTime - PARK_SECONDS + g_cfg.maxFutureDays * SECONDS_PER_DAY;
     }
 
-    // Restzeit nach dem Parken. Was der Core am Parkwert gekuerzt hat, geht
-    // auch von der Restzeit ab, genau wie ohne Parken.
+    // Remaining time after parking. Whatever the core cut from the parked value
+    // is also taken from the remaining time, exactly as without parking.
     uint32 RemainingAfterPark(uint32 remaining, uint32 parkedTime, time_t current)
     {
         uint32 const cut = current < static_cast<time_t>(parkedTime) ? static_cast<uint32>(parkedTime - current) : 0;
         return remaining > cut ? remaining - cut : 0;
     }
 
-    // Setzt geparkte Eintraege auf "jetzt plus Restzeit", ohne geladene Karten.
-    // Nur fuer den Start, wenn der Sitzungsanker abgeschaltet wurde.
+    // Sets parked entries to "now plus remaining time", without loaded maps.
+    // Only for startup, when the session anchor has been turned off.
     void RestoreParkedInDb(uint32 now)
     {
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
@@ -210,8 +209,8 @@ namespace
         CharacterDatabase.CommitTransaction(trans);
     }
 
-    // Zaehlt die angemeldeten Menschen. Botsitzungen tragen kein Socket und
-    // melden sich ueber WorldSession::IsBot(); sie zaehlen hier nicht mit.
+    // Counts logged-in humans. Bot sessions have no socket and identify
+    // themselves through WorldSession::IsBot(); they are not counted.
     uint32 CountHumanPlayers(Player const* excluded)
     {
         uint32 count = 0;
@@ -251,11 +250,10 @@ public:
         LoadConfig();
     }
 
-    // Bewusst dieser Hook: Er laeuft, nachdem die Datenbankverbindungen stehen
-    // und sObjectMgr die Spawndaten kennt, aber bevor die erste Karte erzeugt
-    // wird. Karten lesen ihre Respawn-Zeiten beim Erzeugen
-    // (Map::LoadRespawnTimes); spaeter zu schreiben haette keine Wirkung mehr
-    // auf den bereits geladenen Zustand.
+    // This hook on purpose: it runs after the database connections are up and
+    // sObjectMgr knows the spawn data, but before the first map is created.
+    // Maps read their respawn times on creation (Map::LoadRespawnTimes);
+    // writing later would no longer affect the loaded state.
     void OnBeforeWorldInitialized() override
     {
         if (!_enabled)
@@ -275,13 +273,13 @@ public:
             return;
 
         _sinceHeartbeat = 0;
-        // Asynchron: Der Weltticker darf hierfuer nicht warten.
+        // Asynchronous: the world tick must not wait for this.
         WriteState(static_cast<uint32>(GameTime::GetGameTime().count()), false, false);
     }
 
-    // Letzter Hook vor dem Ende des Prozesses, der nach MapMgr::UnloadAll()
-    // laeuft. Zu diesem Zeitpunkt hat der Core alle offenen Respawn-Zeiten
-    // geschrieben, der Zeitstempel passt also exakt zum Datenbestand.
+    // Last hook before the process ends, running after MapMgr::UnloadAll().
+    // By then the core has written all pending respawn times, so the timestamp
+    // matches the stored data exactly.
     void OnAfterUnloadAllMaps() override
     {
         if (!_enabled)
@@ -289,7 +287,7 @@ public:
 
         uint32 now = static_cast<uint32>(GameTime::GetGameTime().count());
         WriteState(now, true, true);
-        LOG_INFO("module", "[RespawnFreeze] Sauberes Herunterfahren vermerkt.");
+        LOG_INFO("module", "[RespawnFreeze] Clean shutdown recorded.");
     }
 
 private:
@@ -313,15 +311,15 @@ private:
 
         if (g_cfg.maxFutureDays == 0)
         {
-            LOG_WARN("module", "[RespawnFreeze] MaxFutureDays ist 0; das wuerde jede Verschiebung verhindern. Verwende 30.");
+            LOG_WARN("module", "[RespawnFreeze] MaxFutureDays is 0, which would prevent any shift. Using 30.");
             g_cfg.maxFutureDays = 30;
         }
 
         _enabled = g_cfg.enabled;
     }
 
-    // MySQL 8 kennt kein ADD COLUMN IF NOT EXISTS; fuer bestehende
-    // Installationen werden Spalten daher gezielt nachgezogen.
+    // MySQL 8 has no ADD COLUMN IF NOT EXISTS, so columns are added
+    // explicitly for existing installations.
     void EnsureColumn(char const* table, char const* column, char const* definition)
     {
         QueryResult hasColumn = CharacterDatabase.Query(
@@ -332,14 +330,14 @@ private:
         if (hasColumn && (*hasColumn)[0].Get<uint64>() == 0)
         {
             CharacterDatabase.DirectExecute("ALTER TABLE `{}` ADD COLUMN `{}` {}", table, column, definition);
-            LOG_INFO("module", "[RespawnFreeze] Tabelle {} um {} erweitert.", table, column);
+            LOG_INFO("module", "[RespawnFreeze] Table {} extended by column {}.", table, column);
         }
     }
 
     void EnsureTables()
     {
-        // Bewusst im Code statt als SQL-Datei: Es handelt sich um zwei Tabellen,
-        // die vorhanden sein muessen, bevor irgendetwas anderes laeuft.
+        // In code rather than an SQL file on purpose: two tables that must
+        // exist before anything else runs.
         CharacterDatabase.DirectExecute(
             "CREATE TABLE IF NOT EXISTS `{}` ("
             "`id` TINYINT UNSIGNED NOT NULL DEFAULT 1,"
@@ -350,15 +348,15 @@ private:
             "`absence_start` INT UNSIGNED NOT NULL DEFAULT 0,"
             "PRIMARY KEY (`id`)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
-            "COMMENT='mod-offline-respawn-freeze: letzter bekannter Serverzeitpunkt'",
+            "COMMENT='mod-offline-respawn-freeze: last known server time'",
             STATE_TABLE);
 
         EnsureColumn(STATE_TABLE, "absence_start", "INT UNSIGNED NOT NULL DEFAULT 0");
 
-        // Geparkter Bestand zwischen dem Logout des letzten Menschen und dem
-        // naechsten Login. respawnTime ist der urspruengliche Zeitpunkt,
-        // remaining die Restzeit beim Logout, parkedTime der Parkwert, an dem
-        // der Login einen unveraenderten Eintrag wiedererkennt.
+        // Parked entries between the logout of the last human and the next
+        // login. respawnTime is the original time, remaining the remaining time
+        // at logout, parkedTime the parked value by which the login recognises
+        // an unchanged entry.
         CharacterDatabase.DirectExecute(
             "CREATE TABLE IF NOT EXISTS `{}` ("
             "`guid` INT UNSIGNED NOT NULL DEFAULT 0,"
@@ -369,7 +367,7 @@ private:
             "`parkedTime` INT UNSIGNED NOT NULL DEFAULT 0,"
             "PRIMARY KEY (`guid`, `instanceId`)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
-            "COMMENT='mod-offline-respawn-freeze: geparkter Bestand beim Logout des letzten Spielers'",
+            "COMMENT='mod-offline-respawn-freeze: entries parked at the logout of the last player'",
             SNAPSHOT_TABLE);
 
         EnsureColumn(SNAPSHOT_TABLE, "remaining", "INT UNSIGNED NOT NULL DEFAULT 0");
@@ -398,7 +396,7 @@ private:
 
         if (!state)
         {
-            LOG_INFO("module", "[RespawnFreeze] Erster Lauf, kein frueherer Zeitstempel. Es wird nichts verschoben.");
+            LOG_INFO("module", "[RespawnFreeze] First run, no earlier timestamp. Nothing is shifted.");
             WriteState(now, false, true);
             return;
         }
@@ -410,9 +408,9 @@ private:
 
         if (absenceStart > 0 && !g_cfg.dryRun)
         {
-            // Vermerk aus der Zeit vor dem Parken: ohne Restzeiten ist er nicht
-            // mehr auswertbar. Die Eintraege selbst wurden damals nicht
-            // veraendert und laufen einfach weiter.
+            // Record from before parking existed: without remaining times it
+            // can no longer be evaluated. The entries themselves were not
+            // changed back then and simply keep running.
             QueryResult legacy = CharacterDatabase.Query(
                 "SELECT COUNT(*) FROM `{}` WHERE parkedTime = 0", SNAPSHOT_TABLE);
 
@@ -423,43 +421,43 @@ private:
                 trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
                 CharacterDatabase.CommitTransaction(trans);
                 absenceStart = 0;
-                LOG_INFO("module", "[RespawnFreeze] Alter Vermerk ohne Parkzeiten verworfen.");
+                LOG_INFO("module", "[RespawnFreeze] Discarded old record without parking times.");
             }
-            // Wurde der Sitzungsanker abgeschaltet, waehrend einer stand, blieben
-            // die geparkten Mobs sonst ein Jahr lang aus. Sie erhalten ihre
-            // Restzeit ab jetzt zurueck.
+            // If the session anchor was turned off while one was set, the parked
+            // creatures would stay away for a year. They get their remaining
+            // time back from now on.
             else if (!g_cfg.trackSession)
             {
                 RestoreParkedInDb(now);
                 absenceStart = 0;
-                LOG_INFO("module", "[RespawnFreeze] Sitzungsanker ist abgeschaltet; geparkte Respawns laufen ab jetzt mit ihrer Restzeit weiter.");
+                LOG_INFO("module", "[RespawnFreeze] Session anchor is off; parked respawns continue with their remaining time from now on.");
             }
         }
 
-        // Ein gesetzter Anker bedeutet: Der letzte Mensch war beim Herunterfahren
-        // bereits abgemeldet, sein Bestand ist geparkt. Die pauschale Karenz
-        // entfaellt dann, weil der Login jedem geparkten Eintrag seine exakte
-        // Restzeit zurueckgibt.
+        // A set anchor means the last human had already logged out at shutdown
+        // and their entries are parked. The flat grace is not needed then,
+        // because the login returns the exact remaining time to every parked
+        // entry.
         bool const anchored = g_cfg.trackSession && absenceStart > 0;
 
-        // Gegen eine zurueckgestellte Systemuhr: signed rechnen, sonst laeuft
-        // die vorzeichenlose Subtraktion in einen Ueberlauf.
+        // Against a system clock set back: compute signed, otherwise the
+        // unsigned subtraction would wrap around.
         int64 const downtime = static_cast<int64>(now) - static_cast<int64>(lastSeen);
 
         if (downtime < 0)
         {
-            LOG_WARN("module", "[RespawnFreeze] Letzter Zeitstempel liegt in der Zukunft (Systemuhr?). Es wird nichts verschoben.");
+            LOG_WARN("module", "[RespawnFreeze] Last timestamp lies in the future (system clock?). Nothing is shifted.");
             WriteState(now, false, true);
             return;
         }
 
         if (!wasClean)
-            LOG_WARN("module", "[RespawnFreeze] Kein sauberes Herunterfahren erkannt. Es gilt das letzte Lebenszeichen; die Abweichung betraegt hoechstens {} Sekunden.",
+            LOG_WARN("module", "[RespawnFreeze] No clean shutdown detected. Using the last heartbeat; the error is at most {} seconds.",
                      g_cfg.heartbeatMs / 1000);
 
         if (downtime < static_cast<int64>(g_cfg.minAbsence))
         {
-            LOG_INFO("module", "[RespawnFreeze] Ausfallzeit {} liegt unter der Schwelle. Es wird nichts verschoben.",
+            LOG_INFO("module", "[RespawnFreeze] Downtime {} is below the threshold. Nothing is shifted.",
                      HumanDuration(downtime));
             FinishStartup(now, absenceStart, 0, 0);
             return;
@@ -468,32 +466,30 @@ private:
         int64 const maxDowntime = static_cast<int64>(g_cfg.maxDowntimeDays) * SECONDS_PER_DAY;
         if (downtime > maxDowntime)
         {
-            LOG_WARN("module", "[RespawnFreeze] Ausfallzeit {} uebersteigt die Obergrenze von {} Tagen. Es wird nichts verschoben.",
+            LOG_WARN("module", "[RespawnFreeze] Downtime {} exceeds the limit of {} days. Nothing is shifted.",
                      HumanDuration(downtime), g_cfg.maxDowntimeDays);
             FinishStartup(now, absenceStart, 0, 0);
             return;
         }
 
-        // Zwischen dem Start des Servers und dem Augenblick, in dem tatsaechlich
-        // jemand in der Welt steht, vergeht Zeit: Client starten, anmelden,
-        // Charakter waehlen, Gebiet laden. Diese Spanne liefe ungebremst gegen
-        // die Respawns, und die Bots toeten waehrenddessen bereits. Ohne Anker
-        // gleicht die Karenz das pauschal aus; mit Anker ist der Bestand des
-        // Spielers geparkt und braucht sie nicht. Sie wird erst hier
-        // aufgeschlagen, damit sie die Plausibilitaetsschwellen oben nicht
-        // verfaelscht.
+        // Time passes between the server start and the moment someone actually
+        // stands in the world: start the client, log in, choose a character,
+        // load the zone. That span would run against the respawns unchecked,
+        // and bots are already killing meanwhile. Without an anchor the grace
+        // compensates this as a flat value; with an anchor the player's entries
+        // are parked and need no grace. It is added only here so it does not
+        // distort the plausibility thresholds above.
         int64 const shift = downtime + (anchored ? 0 : static_cast<int64>(g_cfg.graceSeconds));
 
-        //   respawnTime > lastSeen   laesst bereits faellige Eintraege in Ruhe,
-        //                            die sonst nachtraeglich in die Zukunft
-        //                            wandern und damit spaeter erschienen.
-        //   respawnTime < obergrenze schuetzt die Markierung "now + YEAR", mit
-        //                            der Map::SaveCreatureRespawnTime Kreaturen
-        //                            kennzeichnet, die vor dem Instanz-Reset
-        //                            nicht wiederkehren, und die geparkten
-        //                            Eintraege.
-        //   NOT EXISTS               haelt geparkte Eintraege auch dann heraus,
-        //                            wenn der Server laenger ohne Spieler lief.
+        //   respawnTime > lastSeen    leaves entries that are already due alone;
+        //                             they would otherwise move into the future
+        //                             and appear later.
+        //   respawnTime < upperBound  protects the "now + YEAR" marker that
+        //                             Map::SaveCreatureRespawnTime uses for
+        //                             creatures that do not return before the
+        //                             instance reset, and the parked entries.
+        //   NOT EXISTS                keeps parked entries out even if the
+        //                             server ran without players for a while.
         uint32 const upperBound = lastSeen + g_cfg.maxFutureDays * SECONDS_PER_DAY;
 
         std::string const select = Acore::StringFormat(
@@ -506,28 +502,28 @@ private:
 
         std::string const grace = anchored
             ? std::string()
-            : Acore::StringFormat(", zuzueglich {} Karenz", HumanDuration(g_cfg.graceSeconds));
+            : Acore::StringFormat(" plus {} grace", HumanDuration(g_cfg.graceSeconds));
 
-        LOG_INFO("module", "[RespawnFreeze] Ausfallzeit {}{}, ergibt {} Verschiebung. {} Eintraege {}{}{}.",
+        LOG_INFO("module", "[RespawnFreeze] Downtime {}{}, giving a shift of {}. {} entries {}{}{}.",
                  HumanDuration(downtime), grace, HumanDuration(shift), res.shifted,
-                 g_cfg.dryRun ? "waeren betroffen" : "verschoben",
-                 SkippedNote(res), g_cfg.includeInstances ? "" : ", offene Welt");
+                 g_cfg.dryRun ? "would be affected" : "shifted",
+                 SkippedNote(res), g_cfg.includeInstances ? "" : ", open world only");
 
         if (g_cfg.dryRun)
         {
-            LOG_INFO("module", "[RespawnFreeze] Probelauf aktiv: es wird nichts geschrieben. Zum Scharfschalten OfflineRespawnFreeze.DryRun = 0 setzen.");
+            LOG_INFO("module", "[RespawnFreeze] Dry run active: nothing is written. Set OfflineRespawnFreeze.DryRun = 0 to apply.");
             return;
         }
 
         if (anchored)
-            LOG_INFO("module", "[RespawnFreeze] Bestand vom letzten Logout ist geparkt und erhaelt beim Login seine Restzeit zurueck.");
+            LOG_INFO("module", "[RespawnFreeze] Entries from the last logout are parked and get their remaining time back at login.");
 
         FinishStartup(now, absenceStart, shift, res.shifted);
     }
 
-    // Schreibt den Zustand fort. Der Anker wandert um dieselbe Spanne mit, damit
-    // die beim Login gemeldete Abwesenheit nur die Zeit mit laufendem Server
-    // enthaelt und MaxDowntimeDays nicht doppelt zaehlt.
+    // Updates the state. The anchor moves by the same span so the absence
+    // reported at login only contains the time with a running server and
+    // MaxDowntimeDays does not count twice.
     void FinishStartup(uint32 now, uint32 absenceStart, int64 shift, uint32 rows)
     {
         if (g_cfg.dryRun)
@@ -535,8 +531,8 @@ private:
 
         uint32 const movedAnchor = absenceStart ? static_cast<uint32>(absenceStart + shift) : 0;
 
-        // Ohne verschobene Eintraege bleiben die Diagnosefelder des letzten
-        // wirksamen Laufs stehen; nur Zeitstempel und Anker werden fortgeschrieben.
+        // Without shifted entries the diagnostic fields of the last effective
+        // run stay; only timestamp and anchor are updated.
         if (!rows)
         {
             CharacterDatabase.DirectExecute(
@@ -570,7 +566,7 @@ public:
         if (!g_cfg.enabled || !g_cfg.trackSession || !IsHuman(player))
             return;
 
-        // Nur der erste Mensch taut die Welt wieder auf.
+        // Only the first human unfreezes the world.
         if (CountHumanPlayers(player) > 0)
             return;
 
@@ -582,7 +578,7 @@ public:
         if (!g_cfg.enabled || !g_cfg.trackSession || !IsHuman(player))
             return;
 
-        // Der Hook laeuft, solange die eigene Sitzung noch in der Liste steht.
+        // The hook runs while the player's own session is still listed.
         if (CountHumanPlayers(player) > 0)
             return;
 
@@ -600,34 +596,33 @@ private:
         uint32 parkedTime;
     };
 
-    // Parkt alle offenen Respawns weit in der Zukunft und vermerkt ihre
-    // Restzeit.
+    // Parks all pending respawns far in the future and records their remaining
+    // time.
     //
-    // Ein blosses Vermerken reicht nicht: Die Respawn-Queue der Karte
-    // (Map::ProcessRespawns) laesst faellige Kreaturen erscheinen, sobald ihr
-    // Grid geladen ist, und loescht dabei den Eintrag. Grids bleiben nach dem
-    // Logout noch Minuten geladen, in der Naehe von Bots dauerhaft. Beim Login
-    // waere dann nichts mehr zu verschieben.
+    // Only recording is not enough: the map's respawn queue
+    // (Map::ProcessRespawns) spawns due creatures as soon as their grid is
+    // loaded and deletes the entry. Grids stay loaded for minutes after
+    // logout, near bots permanently, so there would be nothing left to shift
+    // at login.
     //
-    // Quellen sind fuer geladene Karten deren Speicherabbild, fuer alle
-    // anderen die Datenbank. Kreaturen, die gerade als Leiche liegen, haben
-    // noch keinen Eintrag; sie werden ueber das Kreaturobjekt erfasst.
+    // Sources are the in-memory state for loaded maps and the database for all
+    // others. Creatures currently lying as corpses have no entry yet; they are
+    // captured through the creature object.
     void Freeze()
     {
         uint32 const now = static_cast<uint32>(GameTime::GetGameTime().count());
 
         if (g_cfg.dryRun)
         {
-            LOG_INFO("module", "[RespawnFreeze] Probelauf: Logout des letzten Spielers, es wird nichts geparkt.");
+            LOG_INFO("module", "[RespawnFreeze] Dry run: last player logged out, nothing is parked.");
             return;
         }
 
         uint32 const upperBound = now + g_cfg.maxFutureDays * SECONDS_PER_DAY;
         uint32 const parkUntil  = now + PARK_SECONDS;
 
-        // Erst sammeln, dann schreiben: DoForAllMaps haelt die Sperre des
-        // MapMgr, und SaveCreatureRespawnTime veraendert die Tabelle, ueber
-        // die gerade gelaufen wird.
+        // Collect first, then write: DoForAllMaps holds the MapMgr lock, and
+        // SaveCreatureRespawnTime changes the table being iterated.
         std::vector<Map*> maps;
         sMapMgr->DoForAllMaps([&maps](Map* map)
         {
@@ -694,8 +689,8 @@ private:
 
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
 
-        // Karten, die gerade nicht geladen sind, lesen ihre Zeiten beim
-        // naechsten Erzeugen aus der Datenbank; dort genuegt das UPDATE.
+        // Maps that are not loaded read their times from the database on the
+        // next creation; an UPDATE there is enough.
         if (QueryResult rows = CharacterDatabase.Query(
                 "SELECT guid, instanceId, mapId, respawnTime FROM creature_respawn "
                 "WHERE respawnTime > {} AND respawnTime < {}{}",
@@ -720,10 +715,10 @@ private:
             while (rows->NextRow());
         }
 
-        // Kein DELETE vorab: Steht noch ein Vermerk ohne Login dazwischen, sind
-        // dessen Eintraege bereits geparkt und kaemen hier nicht mehr vor.
-        // Sie muessen im Vermerk bleiben, sonst erhielten sie nie ihre
-        // Restzeit zurueck.
+        // No DELETE first: if an earlier record without a login in between is
+        // still there, its entries are already parked and would not show up
+        // here. They must stay in the record, or they would never get their
+        // remaining time back.
         for (std::size_t start = 0; start < parked.size(); start += INSERT_CHUNK)
         {
             std::string values;
@@ -745,13 +740,13 @@ private:
         CharacterDatabase.CommitTransaction(trans);
 
         res.shifted = static_cast<uint32>(parked.size());
-        LOG_INFO("module", "[RespawnFreeze] Letzter Spieler abgemeldet. {} Respawn-Zeiten geparkt, davon {} auf geladenen Karten{}.",
+        LOG_INFO("module", "[RespawnFreeze] Last player logged out. {} respawn times parked, {} of them on loaded maps{}.",
                  res.shifted, res.inMemory, SkippedNote(res));
     }
 
-    // Gibt jedem geparkten Eintrag seine Restzeit zurueck, gerechnet ab jetzt.
-    // Wer den Parkwert nicht mehr traegt, wurde zwischenzeitlich von aussen
-    // veraendert (etwa per GM-Befehl) und bleibt unberuehrt.
+    // Gives every parked entry its remaining time back, counted from now.
+    // Entries that no longer carry the parked value were changed from outside
+    // in the meantime (for example by a GM command) and are left alone.
     void Release()
     {
         uint32 const now = static_cast<uint32>(GameTime::GetGameTime().count());
@@ -768,14 +763,14 @@ private:
 
         int64 const absence = static_cast<int64>(now) - static_cast<int64>(absenceStart);
 
-        // Nach sehr langer Abwesenheit erwartet niemand mehr einen bestimmten
-        // Mob; dann erscheint alles Geparkte sofort, als waere die Zeit
-        // normal gelaufen.
+        // After a very long absence nobody expects a particular creature any
+        // more; everything parked then appears immediately, as if time had
+        // passed normally.
         int64 const maxAbsence = static_cast<int64>(g_cfg.maxDowntimeDays) * SECONDS_PER_DAY;
         bool const tooLong = absence > maxAbsence;
 
         if (tooLong)
-            LOG_WARN("module", "[RespawnFreeze] Abwesenheit {} uebersteigt die Obergrenze von {} Tagen. Geparkte Respawns erscheinen sofort.",
+            LOG_WARN("module", "[RespawnFreeze] Absence {} exceeds the limit of {} days. Parked respawns appear immediately.",
                      HumanDuration(absence), g_cfg.maxDowntimeDays);
 
         ShiftResult res;
@@ -807,10 +802,10 @@ private:
                     time_t stored = tooLong ? now : now + RemainingAfterPark(remaining, parkedTime, current);
                     map->SaveCreatureRespawnTime(guid, stored);
 
-                    // Tote Kreaturobjekte, auch Leichen, tragen den Parkwert
-                    // selbst, bei gepluenderten Leichen leicht gekuerzt.
-                    // Kreaturen, die Bots seither erlegt haben, tragen einen
-                    // echten Zeitpunkt und bleiben unberuehrt.
+                    // Dead creature objects, corpses included, carry the
+                    // parked value themselves, slightly shortened for looted
+                    // corpses. Creatures killed by bots since then carry a real
+                    // time and are left alone.
                     auto bounds = map->GetCreatureBySpawnIdStore().equal_range(guid);
                     for (auto itr = bounds.first; itr != bounds.second; ++itr)
                     {
@@ -849,7 +844,7 @@ private:
             trans->Append("UPDATE `{}` SET absence_start = 0 WHERE id = 1", STATE_TABLE);
         CharacterDatabase.CommitTransaction(trans);
 
-        LOG_INFO("module", "[RespawnFreeze] Abwesenheit {}. {} Respawn-Zeiten mit ihrer Restzeit fortgesetzt, davon {} auf geladenen Karten{}.",
+        LOG_INFO("module", "[RespawnFreeze] Absence {}. {} respawn times continued with their remaining time, {} of them on loaded maps{}.",
                  HumanDuration(absence), res.shifted, res.inMemory, SkippedNote(res));
     }
 };

@@ -64,7 +64,6 @@ player benefit, free-roaming random bots stay at normal regeneration.
 - [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots) is optional.
   Bots are recognised through `WorldSession::IsBot()`, so no module includes
   Playerbot headers.
-- Configuration comments and server log messages are currently in German.
 
 ## Installation
 

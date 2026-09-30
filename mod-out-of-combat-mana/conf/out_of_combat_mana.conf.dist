@@ -3,32 +3,32 @@
 ########################################
 # mod-out-of-combat-mana
 #
-# Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des
-# Kampfes. Gilt für echte Spieler und für Bots in einer Gruppe oder einem
-# Raid mit einem echten Spieler; frei laufende RandomBots bleiben normal.
+# Multiplies the normal mana regeneration of players outside of combat.
+# Applies to real players and to bots in a group or raid with a real player;
+# free-roaming random bots stay normal.
 #
-# Unverändert bleiben Rate.Mana der worldserver.conf, die Regeneration im
-# Kampf, Wut, Energie, Runenmacht sowie Begleiter, Wächter und Kreaturen.
-# Die Fünf-Sekunden-Regel bleibt wirksam: Nach einem Zauber wird der
-# unterbrochene Regenerationswert vervielfacht, nicht der volle.
+# Unchanged: Rate.Mana of worldserver.conf, regeneration in combat, rage,
+# energy, runic power, as well as pets, guardians and creatures. The
+# five-second rule stays in effect: after casting, the interrupted
+# regeneration value is multiplied, not the full one.
 ########################################
 
 #
 #    OutOfCombatMana.Enable
-#        Beschreibung: Modul ein- oder ausschalten.
-#        Vorgabe:      1
+#        Description: Turn the module on or off.
+#        Default:     1
 #
 
 OutOfCombatMana.Enable = 1
 
 #
 #    OutOfCombatMana.Multiplier
-#        Beschreibung: Faktor auf die Mana-Regeneration, die der Core außerhalb
-#                      des Kampfes ohnehin berechnet (einschließlich Rate.Mana).
-#                      1.0 entspricht genau dem Verhalten ohne Modul. Werte
-#                      unter 1 gelten als ungültig und wirken wie 1.0.
-#        Beispiel:     2.0 verdoppelt die Regeneration außerhalb des Kampfes.
-#        Vorgabe:      2.0
+#        Description: Factor on the mana regeneration the core already computes
+#                     outside of combat (including Rate.Mana). 1.0 is exactly
+#                     the behaviour without the module. Values below 1 are
+#                     invalid and act like 1.0.
+#        Example:     2.0 doubles the regeneration outside of combat.
+#        Default:     2.0
 #
 
 OutOfCombatMana.Multiplier = 2.0

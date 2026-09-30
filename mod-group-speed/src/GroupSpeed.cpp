@@ -1,19 +1,19 @@
 /*
  * mod-group-speed
  *
- * .group speed #rate setzt für jedes online befindliche Mitglied der eigenen
- * Party oder des eigenen Raids (Playerbots eingeschlossen) dieselben
- * Geschwindigkeiten wie .modify speed all für einen ausgewählten Spieler.
+ * .group speed #rate sets, for every online member of the caller's party or
+ * raid (Playerbots included), the same speeds as .modify speed all does for a
+ * selected player.
  *
- * Warum ein Modul: Der Befehlsbaum führt die Tabellen aller CommandScripts
- * über den Namen zusammen (ChatCommandNode::LoadCommandsIntoMap). "speed"
- * hängt sich damit unter das vorhandene ".group" ein, ohne cs_group.cpp zu
- * verändern. Ein Core-Update überschreibt den Befehl daher nicht.
+ * Why a module: the command tree merges the tables of all CommandScripts by
+ * name (ChatCommandNode::LoadCommandsIntoMap). "speed" therefore attaches
+ * below the existing ".group" without changing cs_group.cpp, and core updates
+ * do not overwrite the command.
  *
- * Semantik bewusst identisch zu HandleModifyASpeedCommand und
- * CheckModifySpeed (cs_modify.cpp): Grenzen 0.1 bis 50, Sicherheitsstufe des
- * Ziels, keine Änderung während eines Taxiflugs, SetSpeed(..., true) für
- * walk, run, swim und flight. Wie dort gilt der Wert nur bis zum Logout.
+ * Semantics deliberately identical to HandleModifyASpeedCommand and
+ * CheckModifySpeed (cs_modify.cpp): limits 0.1 to 50, target security level,
+ * no change during a taxi flight, SetSpeed(..., true) for walk, run, swim and
+ * flight. As there, the value only lasts until logout.
  */
 
 #include "Chat.h"
@@ -29,7 +29,7 @@ using namespace Acore::ChatCommands;
 
 namespace
 {
-    // Dieselben Grenzen wie CheckModifySpeed in cs_modify.cpp.
+    // Same limits as CheckModifySpeed in cs_modify.cpp.
     constexpr float MIN_SPEED = 0.1f;
     constexpr float MAX_SPEED = 50.0f;
 
@@ -46,8 +46,9 @@ public:
 
     ChatCommandTable GetCommands() const override
     {
-        // Wirksame Stufe kommt wie bei allen Befehlen aus acore_world.command;
-        // die Modul-SQL übernimmt dort die Stufe von "modify speed all".
+        // As for all commands, the effective level comes from
+        // acore_world.command; the module SQL copies the level of
+        // "modify speed all" there.
         static ChatCommandTable groupCommandTable =
         {
             { "speed", HandleGroupSpeedCommand, rbac::RBAC_PERM_COMMAND_MODIFY_SPEED_ALL, Console::No }
@@ -87,8 +88,8 @@ public:
             ++skippedCount;
         };
 
-        // Die Mitgliederliste enthält nur geladene Spieler; Offline-Mitglieder
-        // haben keine Referenz. Begleiter sind keine Gruppenmitglieder.
+        // The member list only contains loaded players; offline members have
+        // no reference. Pets are not group members.
         for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
         {
             Player* member = itr->GetSource();
@@ -101,7 +102,7 @@ public:
                 continue;
             }
 
-            // Meldet selbst LANG_YOURS_SECURITY_IS_LOW, wie bei .modify speed all.
+            // Reports LANG_YOURS_SECURITY_IS_LOW itself, like .modify speed all.
             if (handler->HasLowerSecurity(member))
             {
                 skip(member, "higher security");
@@ -120,8 +121,8 @@ public:
             member->SetSpeed(MOVE_FLIGHT, speed, true);
             ++changed;
 
-            // Menschliche Mitspieler erfahren es wie bei .modify speed all;
-            // Bots nicht, dort landete die Meldung ungelesen.
+            // Human members are told, like with .modify speed all; bots are
+            // not, the message would go unread there.
             if (!member->GetSession()->IsBot() && handler->needReportToTarget(member))
                 ChatHandler(member->GetSession()).PSendSysMessage(LANG_YOURS_ASPEED_CHANGED, handler->GetNameLink(), speed);
         }

@@ -1,7 +1,7 @@
--- Hilfetext und Berechtigung für .group speed.
--- Die Stufe wird von "modify speed all" übernommen, damit der Gruppenbefehl nie
--- niedriger freigegeben ist als der Einzelbefehl. Fehlt jene Zeile, gilt 3
--- (Administrator), also eher strenger.
+-- Help text and permission for .group speed.
+-- The level is copied from "modify speed all" so the group command is never
+-- available at a lower level than the single-target command. If that row is
+-- missing, 3 (administrator) applies, which is the stricter choice.
 DELETE FROM `command` WHERE `name` = 'group speed';
 INSERT INTO `command` (`name`, `security`, `help`)
 SELECT 'group speed', IFNULL(MAX(`security`), 3),

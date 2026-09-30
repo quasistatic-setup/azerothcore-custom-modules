@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Prüft src/QuestDropRateLogic.h ohne Server und ohne Core.
+# Checks src/QuestDropRateLogic.h without a server and without the core.
 #
-# Der Test steht bewusst nicht als .cpp im Modul: CMake sammelt den ganzen
-# Modulbaum in die worldserver-Bibliothek, eine zweite main() bräche den Build.
+# The test is deliberately not a .cpp file in the module: CMake collects the
+# whole module tree into the worldserver library, and a second main() would
+# break the build.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 work="$(mktemp -d)"
@@ -18,10 +19,10 @@ int main()
 {
     Entry quest{true, 0, 0, false};
     Entry normal{false, 0, 0, false};
-    Entry ref{true, 1055, 0, false};       // Referenz, selbst wenn als Quest markiert
+    Entry ref{true, 1055, 0, false};       // reference, even if flagged as quest
     Entry pureGroup{true, 0, 2, false};
     Entry mixedGroup{true, 0, 2, true};
-    Entry mixedFlagUngrouped{true, 0, 0, true}; // ohne Gruppe spielt "gemischt" keine Rolle
+    Entry mixedFlagUngrouped{true, 0, 0, true}; // without a group "mixed" does not matter
 
     assert(eq(Apply(true, 2.0f, quest, 40.0f), 80.0f));
     assert(eq(Apply(true, 2.0f, quest, 60.0f), 100.0f));
@@ -38,7 +39,7 @@ int main()
     assert(eq(Apply(true, 0.5f, quest, 40.0f), 40.0f));
     assert(eq(Apply(true, NAN, quest, 40.0f), 40.0f));
     assert(eq(Apply(true, INFINITY, quest, 40.0f), 40.0f));
-    std::puts("QuestDropRateLogic: alle Prüfungen bestanden");
+    std::puts("QuestDropRateLogic: all checks passed");
 }
 CPP
 g++ -std=c++20 -Wall -Wextra -Werror -UNDEBUG -I "$here/../src" "$work/test.cpp" -o "$work/test"

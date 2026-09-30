@@ -55,8 +55,8 @@ no overlap: they use different item IDs (13582 Zergling Leash, 13583 Panda Colla
 | `WelcomePromos.Enable` | `1` | Turn the module on or off |
 | `WelcomePromos.Items` | ten promo pets and mounts | Comma-separated item IDs. Unknown IDs are skipped and logged, duplicates sent once; more than twelve items are split across several mails |
 | `WelcomePromos.SenderEntry` | `0` | `creature_template` entry used as sender; `0` sends as a game master mail |
-| `WelcomePromos.Subject` | German text | Mail subject; with several mails a counter such as `(1/2)` is appended |
-| `WelcomePromos.Body` | German text | Mail text |
+| `WelcomePromos.Subject` | `Special keepsakes` | Mail subject; with several mails a counter such as `(1/2)` is appended |
+| `WelcomePromos.Body` | short English welcome text | Mail text |
 | `WelcomePromos.ExcludedAccountPrefixes` | empty | Additional account prefixes that never receive the mail, case-insensitive |
 
 The default items are 20371 Blue Murloc Egg, 39656 Tyrael's Hilt, 43599 Big

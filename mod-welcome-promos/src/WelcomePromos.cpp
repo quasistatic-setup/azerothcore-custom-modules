@@ -1,21 +1,19 @@
 /*
  * mod-welcome-promos
  *
- * Schickt jedem neu erstellten Charakter einmalig eine Willkommensmail mit
- * historischen Aktions- und Sondergegenstaenden.
+ * Sends every newly created character a one-time welcome mail with historical
+ * promotional and special items.
  *
- * Warum ein Modul und nicht mail_server_template: Jenes stellt bei jedem
- * Login zu und traegt den Charakter danach in mail_server_character ein.
- * Auf einem Server mit Playerbots betrifft das saemtliche Bot-Charaktere,
- * oft Tausende gegenueber wenigen echten. Das waeren zehntausende erzeugte
- * Gegenstaende in Bot-Postfaechern. OnPlayerCreate loest dagegen nur bei
- * tatsaechlicher Neuerstellung aus; bestehende Charaktere bleiben damit
- * unberuehrt, ohne dass man sie vorher eintragen muesste.
+ * Why a module and not mail_server_template: that system delivers on every
+ * login and then records the character in mail_server_character. On a server
+ * with Playerbots this hits every bot character, often thousands against a
+ * few real ones, which would mean tens of thousands of items in bot
+ * mailboxes. OnPlayerCreate only fires when a character is actually created,
+ * so existing characters are left alone without registering them first.
  *
- * Die Belohnungen der Sammleredition laufen weiter ueber die Kontokennzeichen
- * des Cores. Es gibt keine Ueberschneidung: Jene verwenden andere
- * Gegenstandsnummern (13582 Zergling Leash, 13583 Panda Collar,
- * 13584 Diablo Stone).
+ * Collector's Edition rewards keep working through the core's account flags.
+ * There is no overlap: they use different item IDs (13582 Zergling Leash,
+ * 13583 Panda Collar, 13584 Diablo Stone).
  */
 
 #include "AccountMgr.h"
@@ -44,9 +42,9 @@ public:
         PLAYERHOOK_ON_DELETE_FROM_DB
     }) { }
 
-    // Wird nach dem erfolgreichen Festschreiben der Charaktererstellung
-    // aufgerufen (CharacterHandler.cpp). Der Charakter steht zu diesem
-    // Zeitpunkt in der Datenbank, der Mailversand ist also sicher.
+    // Called after the character creation has been committed
+    // (CharacterHandler.cpp). The character exists in the database at this
+    // point, so sending mail is safe.
     void OnPlayerCreate(Player* player) override
     {
         if (!sConfigMgr->GetOption<bool>("WelcomePromos.Enable", true) || !player)
@@ -57,8 +55,8 @@ public:
         if (IsExcludedAccount(player->GetSession() ? player->GetSession()->GetAccountId() : 0))
             return;
 
-        // Sicherheitsnetz: Der Hook feuert je Charakter genau einmal. Sollte
-        // sich das je aendern, verhindert die Marke eine zweite Sendung.
+        // Safety net: the hook fires exactly once per character. Should that
+        // ever change, the marker prevents a second delivery.
         if (AlreadyDelivered(guid))
             return;
 
@@ -67,21 +65,20 @@ public:
             return;
 
         MarkDelivered(guid, mails);
-        LOG_INFO("module", "[WelcomePromos] {} ({}) hat {} Willkommensmail(s) erhalten.",
+        LOG_INFO("module", "[WelcomePromos] {} ({}) received {} welcome mail(s).",
                  player->GetName(), guid, mails);
     }
 
-    // Charakter-GUIDs koennen nach einer endgueltigen Loeschung erneut
-    // vergeben werden. Deshalb muss die Versandmarke in derselben Transaktion
-    // wie der Charakter entfernt werden.
+    // Character GUIDs can be reused after a permanent deletion, so the delivery
+    // marker has to be removed in the same transaction as the character.
     void OnPlayerDeleteFromDB(CharacterDatabaseTransaction trans, uint32 guid) override
     {
         trans->Append("DELETE FROM `{}` WHERE guid = {}", SENT_TABLE, guid);
     }
 
 private:
-    // Bot-Konten aussen vor lassen. Der Praefix wird aus der Playerbots-
-    // Konfiguration gelesen, damit beide Seiten nicht auseinanderlaufen.
+    // Skip bot accounts. The prefix is read from the Playerbots configuration
+    // so both sides cannot drift apart.
     bool IsExcludedAccount(uint32 accountId) const
     {
         if (!accountId)
@@ -99,7 +96,7 @@ private:
         if (!prefix.empty() && upper.rfind(prefix, 0) == 0)
             return true;
 
-        // Zusaetzliche Praefixe aus der eigenen Konfiguration, kommagetrennt.
+        // Additional comma-separated prefixes from this module's configuration.
         std::string extra = sConfigMgr->GetOption<std::string>("WelcomePromos.ExcludedAccountPrefixes", "");
         for (std::string_view part : Acore::Tokenize(extra, ',', false))
         {
@@ -141,17 +138,17 @@ private:
             if (!entry || !*entry)
                 continue;
 
-            // Nie einen Gegenstand verschicken, den es nicht gibt: Der
-            // Mailversand wuerde ihn stillschweigend auslassen.
+            // Never send an item that does not exist: the mail would silently
+            // leave it out.
             if (!sObjectMgr->GetItemTemplate(*entry))
             {
-                LOG_ERROR("module", "[WelcomePromos] Gegenstand {} existiert nicht und wird uebersprungen.", *entry);
+                LOG_ERROR("module", "[WelcomePromos] Item {} does not exist and is skipped.", *entry);
                 continue;
             }
 
             if (std::find(items.begin(), items.end(), *entry) != items.end())
             {
-                LOG_WARN("module", "[WelcomePromos] Gegenstand {} ist doppelt konfiguriert und wird nur einmal verschickt.", *entry);
+                LOG_WARN("module", "[WelcomePromos] Item {} is configured twice and is sent only once.", *entry);
                 continue;
             }
 
@@ -165,17 +162,17 @@ private:
         std::vector<uint32> items = ConfiguredItems();
         if (items.empty())
         {
-            LOG_WARN("module", "[WelcomePromos] Keine gueltigen Gegenstaende konfiguriert, es wird nichts verschickt.");
+            LOG_WARN("module", "[WelcomePromos] No valid items configured, nothing is sent.");
             return 0;
         }
 
         uint32 senderEntry = sConfigMgr->GetOption<uint32>("WelcomePromos.SenderEntry", 0);
-        std::string subject = sConfigMgr->GetOption<std::string>("WelcomePromos.Subject", "Besondere Erinnerungsstuecke");
+        std::string subject = sConfigMgr->GetOption<std::string>("WelcomePromos.Subject", "Special keepsakes");
         std::string body    = sConfigMgr->GetOption<std::string>("WelcomePromos.Body",
-            "Willkommen in Azeroth! Im Anhang findest du einige besondere Erinnerungsstuecke.");
+            "Welcome to Azeroth! Attached you will find some special keepsakes.");
 
-        // Ein Brief fasst hoechstens MAX_MAIL_ITEMS Anhaenge. Bei mehr
-        // Gegenstaenden wird automatisch auf mehrere Briefe aufgeteilt.
+        // One mail holds at most MAX_MAIL_ITEMS attachments. More items are
+        // split across several mails automatically.
         std::size_t const perMail = MAX_MAIL_ITEMS;
         std::size_t const total   = items.size();
         uint32 const mailCount = static_cast<uint32>((total + perMail - 1) / perMail);
@@ -207,7 +204,7 @@ private:
                     any = true;
                 }
                 else
-                    LOG_ERROR("module", "[WelcomePromos] Gegenstand {} liess sich nicht erzeugen.", items[i]);
+                    LOG_ERROR("module", "[WelcomePromos] Item {} could not be created.", items[i]);
             }
 
             if (!any)
@@ -234,8 +231,8 @@ public:
 
     void OnBeforeWorldInitialized() override
     {
-        // Eine einzige Tabelle; im Code angelegt, damit sie sicher vorhanden
-        // ist, bevor der erste Charakter erstellt werden kann.
+        // A single table, created in code so it is guaranteed to exist before
+        // the first character can be created.
         CharacterDatabase.DirectExecute(
             "CREATE TABLE IF NOT EXISTS `{}` ("
             "`guid` INT UNSIGNED NOT NULL,"
@@ -243,7 +240,7 @@ public:
             "`sent_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
             "PRIMARY KEY (`guid`)"
             ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci "
-            "COMMENT='mod-welcome-promos: bereits belieferte Charaktere'",
+            "COMMENT='mod-welcome-promos: characters already served'",
             SENT_TABLE);
     }
 };

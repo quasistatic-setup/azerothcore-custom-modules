@@ -1,29 +1,26 @@
 /*
  * mod-quest-drop-rate
  *
- * Erhöht die Dropchance echter Questgegenstände (LootStoreItem::needs_quest)
- * um einen einstellbaren Faktor, höchstens auf 100 %. Normales Loot,
- * Referenzen und Gegenstände ohne Quest-Anforderung bleiben unverändert;
- * Rate.Drop.Item.* wird nicht angefasst.
+ * Raises the drop chance of real quest items (LootStoreItem::needs_quest) by a
+ * configurable factor, capped at 100 %. Normal loot, references and items
+ * without a quest requirement stay unchanged; Rate.Drop.Item.* is not touched.
  *
- * Warum ein Modul: Der Core ruft ScriptMgr::OnItemRoll für jeden Eintrag mit
- * eigener Chance auf, bevor er würfelt (LootStoreItem::Roll und
- * LootTemplate::LootGroup::Roll). Der Hook darf die Chance ändern. Damit
- * wirkt das Modul auf alle Loot-Arten gleich, Angeln eingeschlossen, ohne
- * einen Core-Patch.
+ * Why a module: the core calls ScriptMgr::OnItemRoll for every entry with its
+ * own chance before rolling (LootStoreItem::Roll and
+ * LootTemplate::LootGroup::Roll), and the hook may change the chance. The
+ * module therefore works the same for every loot type, fishing included,
+ * without a core patch.
  *
- * Zusammenspiel mit dem Core: Bei Einträgen außerhalb von Gruppen wendet
- * LootStoreItem::Roll nach dem Hook noch den Qualitätsfaktor
- * Rate.Drop.Item.<Qualität> an, außer die Chance hat 100 erreicht. Die
- * wirksame Chance verdoppelt sich also bei Faktor 2 genau; wer 100 erreicht,
- * fällt sicher. In Gruppen gibt es keinen Qualitätsfaktor.
+ * Interplay with the core: for entries outside of groups, LootStoreItem::Roll
+ * applies the quality factor Rate.Drop.Item.<quality> after the hook unless
+ * the chance has reached 100. With factor 2 the effective chance thus doubles
+ * exactly; anything reaching 100 always drops. Groups have no quality factor.
  *
- * Gruppen: Einträge einer Gruppe teilen sich einen Wurf. Liegt ein
- * Questgegenstand zusammen mit normalen Gegenständen in einer Gruppe, ginge
- * jede zusätzliche Chance zu deren Lasten. Solche Einträge bleiben daher
- * unverändert. Der Hook kennt die Loot-Tabelle nicht (Einträge aus Referenzen
- * kommen mit dem Store des Aufrufers), deshalb gilt der Ausschluss für jedes
- * Paar aus Gegenstand und Gruppennummer, das irgendwo gemischt vorkommt.
+ * Groups: entries of one group share a single roll. If a quest item sits in a
+ * group together with normal items, any extra chance would be taken from
+ * them, so such entries stay unchanged. The hook does not know the loot table
+ * (entries from references arrive with the caller's store), so the exclusion
+ * applies to every item/group pair that appears mixed anywhere.
  */
 
 #include "Config.h"
@@ -40,12 +37,12 @@
 
 namespace
 {
-    // OnItemRoll läuft in den Map-Threads; ein Konfigurations-Reload darf die
-    // Werte gleichzeitig ändern.
+    // OnItemRoll runs in the map threads; a config reload may change the
+    // values at the same time.
     std::atomic<bool> g_enabled{true};
     std::atomic<float> g_multiplier{2.0f};
 
-    // Wird nur beim Start gefüllt, bevor Loot erzeugt wird, danach nur gelesen.
+    // Filled only at startup, before any loot is generated; read-only afterwards.
     std::unordered_set<uint32> g_mixedGroupEntries;
 
     constexpr char const* LOOT_TABLES[] =
@@ -59,7 +56,7 @@ namespace
 
     uint32 MixedKey(uint32 itemId, uint8 groupId)
     {
-        // Gegenstandsnummern bleiben unter 2^24, die Gruppennummer hat 7 Bit.
+        // Item IDs stay below 2^24, the group ID has 7 bits.
         return (itemId << 8) | groupId;
     }
 
@@ -70,7 +67,7 @@ namespace
 
         if (!QuestDropRate::IsValidMultiplier(multiplier))
         {
-            LOG_ERROR("module", "[QuestDropRate] QuestDropRate.Multiplier = {} ist ungültig (mindestens 1). Die Dropchancen bleiben unverändert.", multiplier);
+            LOG_ERROR("module", "[QuestDropRate] QuestDropRate.Multiplier = {} is invalid (minimum 1). Drop chances stay unchanged.", multiplier);
             multiplier = 1.0f;
         }
 
@@ -127,11 +124,11 @@ private:
     {
         if (!g_enabled.load())
         {
-            LOG_INFO("module", "[QuestDropRate] Abgeschaltet.");
+            LOG_INFO("module", "[QuestDropRate] Disabled.");
             return;
         }
 
-        LOG_INFO("module", "[QuestDropRate] Aktiv: Questgegenstände mit Faktor {}, höchstens 100 %. {} Paare aus Gegenstand und Gruppe in gemischten Gruppen bleiben unverändert.",
+        LOG_INFO("module", "[QuestDropRate] Active: quest items with factor {}, capped at 100 %. {} item/group pairs in mixed groups stay unchanged.",
             g_multiplier.load(), g_mixedGroupEntries.size());
     }
 };
@@ -158,7 +155,7 @@ public:
 
         chance = QuestDropRate::Apply(g_enabled.load(), g_multiplier.load(), entry, chance);
 
-        // true: der Core würfelt normal weiter.
+        // true: the core continues rolling as usual.
         return true;
     }
 };

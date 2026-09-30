@@ -1,37 +1,36 @@
 /*
  * mod-out-of-combat-mana
  *
- * Vervielfacht die normale Mana-Regeneration von Spielern außerhalb des
- * Kampfes um OutOfCombatMana.Multiplier. Gilt für echte Spieler und für Bots
- * in einer Gruppe oder einem Raid mit einem echten Spieler; frei laufende
- * RandomBots bleiben unverändert. Rate.Mana, Wut, Energie, Runenmacht,
- * Begleiter und Kreaturen bleiben ebenfalls unverändert.
+ * Multiplies the normal mana regeneration of players outside of combat by
+ * OutOfCombatMana.Multiplier. Applies to real players and to bots in a group
+ * or raid with a real player; free-roaming random bots stay unchanged.
+ * Rate.Mana, rage, energy, runic power, pets and creatures stay unchanged as
+ * well.
  *
- * Bots erkennt das Modul an WorldSession::IsBot(), das mod-playerbots für
- * seine Sitzungen setzt; Selfbots laufen über die Client-Sitzung und zählen
- * als echte Spieler. So braucht das Modul keine Playerbots-Header. Im
- * Schlachtfeld zählt die eigentliche Gruppe, nicht der Schlachtfeld-Raid.
+ * Bots are recognised through WorldSession::IsBot(), which mod-playerbots sets
+ * for its sessions; selfbots run on the client session and count as real
+ * players. The module therefore needs no Playerbot headers. In battlegrounds
+ * the original group counts, not the battleground raid.
  *
- * Warum dieser Hook: Der Core hat keinen Hook in Player::Regenerate. Er ruft
- * in Player::Update aber OnPlayerUpdate unmittelbar vor
- * "if (IsAlive()) { m_regenTimer += p_time; RegenerateAll(); }" auf. Weil
- * RegenerateAll m_regenTimer danach auf 0 setzt, rechnet der Core Mana in
- * jedem Update-Schritt mit genau p_time. Das Modul rechnet im selben Schritt,
- * mit demselben Zustand und derselben Formel, und ergänzt den Anteil über 1.
+ * Why this hook: the core has no hook in Player::Regenerate. In
+ * Player::Update, however, it calls OnPlayerUpdate right before
+ * "if (IsAlive()) { m_regenTimer += p_time; RegenerateAll(); }". Because
+ * RegenerateAll resets m_regenTimer to 0 afterwards, the core computes mana in
+ * every update step with exactly p_time. The module computes in the same
+ * step, with the same state and formula, and adds the share above 1.
  *
- * Fünf-Sekunden-Regel: Wie der Core liest das Modul nach einem Manaverbrauch
- * (IsUnderLastManaUseEffect) den unterbrochenen Regenerationswert. Es
- * vervielfacht damit genau das, was der Core gerade gibt, und umgeht die
- * Regel nicht. Auren, die Mana-Regeneration verhindern, gelten ebenso.
+ * Five-second rule: like the core, the module reads the interrupted
+ * regeneration value after spending mana (IsUnderLastManaUseEffect). It
+ * multiplies exactly what the core currently grants and does not bypass the
+ * rule. Auras that prevent mana regeneration apply as well.
  *
- * Kosten: Die Konfiguration liegt atomar vor, weil Map-Threads parallel
- * laufen. Bruchteil und Gruppenergebnis je Spieler liegen in dessen
- * CustomData und werden nur vom eigenen Map-Thread berührt, daher ohne
- * Sperre. Bots ohne Gruppe scheiden vor jedem Nachschlagen aus; die Gruppe
- * eines Bots wird höchstens einmal je Sekunde durchsucht. Ganze Punkte schreibt
- * das Modul wie der Core als Feldänderung ohne eigenes SMSG_POWER_UPDATE;
- * das Paket kommt mit dem 2-Sekunden-Takt des Cores oder beim Erreichen des
- * Maximums.
+ * Cost: the configuration is atomic because map threads run in parallel. The
+ * fraction and group result per player live in that player's CustomData and
+ * are only touched by its own map thread, so no lock is needed. Bots without
+ * a group drop out before any lookup; a bot's group is scanned at most once
+ * per second. Like the core, whole points are written as a field update
+ * without a separate SMSG_POWER_UPDATE; the packet comes with the core's
+ * two-second tick or when mana reaches its maximum.
  */
 
 #include "Config.h"
@@ -85,8 +84,8 @@ namespace
 
         if (!OutOfCombatMana::IsValidMultiplier(multiplier))
         {
-            LOG_ERROR("module", "[OutOfCombatMana] OutOfCombatMana.Multiplier = {} ist ungültig (mindestens 1). "
-                "Die Mana-Regeneration bleibt unverändert.", multiplier);
+            LOG_ERROR("module", "[OutOfCombatMana] OutOfCombatMana.Multiplier = {} is invalid (minimum 1). "
+                "Mana regeneration stays unchanged.", multiplier);
             multiplier = 1.0f;
         }
 
@@ -94,10 +93,10 @@ namespace
         g_multiplier.store(multiplier);
 
         if (!enabled)
-            LOG_INFO("module", "[OutOfCombatMana] Abgeschaltet.");
+            LOG_INFO("module", "[OutOfCombatMana] Disabled.");
         else
-            LOG_INFO("module", "[OutOfCombatMana] Aktiv: Mana-Regeneration außerhalb des Kampfes mit Faktor {}. "
-                "Gilt für Spieler und Bots in deren Gruppen.", multiplier);
+            LOG_INFO("module", "[OutOfCombatMana] Active: out-of-combat mana regeneration with factor {}. "
+                "Applies to players and the bots in their groups.", multiplier);
     }
 }
 
@@ -130,8 +129,8 @@ public:
         if (multiplier <= 1.0f)
             return;
 
-        // Dieselben Bedingungen wie Player::Update und Player::Regenerate,
-        // dazu "außerhalb des Kampfes".
+        // Same conditions as Player::Update and Player::Regenerate, plus
+        // "out of combat".
         if (!player->IsAlive() || player->IsInCombat())
             return;
 
@@ -140,7 +139,7 @@ public:
         if (!maxMana || curMana >= maxMana)
             return;
 
-        // .cheat power füllt der Core ohnehin auf.
+        // The core refills mana for .cheat power anyway.
         if (player->GetCommandStatus(CHEAT_POWER))
             return;
 
@@ -158,8 +157,8 @@ public:
         if (bonus <= 0.0f)
             return;
 
-        // Bots ohne Gruppe (die meisten RandomBots) scheiden aus, bevor
-        // CustomData nachgeschlagen wird.
+        // Bots without a group (most random bots) drop out before CustomData
+        // is looked up.
         bool isBot = player->GetSession()->IsBot();
         Group* group = isBot ? RelevantGroup(player) : nullptr;
         if (isBot && !group)
@@ -188,8 +187,8 @@ public:
         if (newMana == maxMana)
             state->fraction = 0.0f;
 
-        // Wie Player::Regenerate: Zwischenstände nur als Feldänderung, das
-        // Paket erst beim Maximum.
+        // Like Player::Regenerate: intermediate values only as a field update,
+        // the packet only at the maximum.
         player->SetPower(POWER_MANA, newMana, newMana == maxMana, true);
     }
 };
