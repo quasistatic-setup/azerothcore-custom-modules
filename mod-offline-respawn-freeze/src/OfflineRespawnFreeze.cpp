@@ -17,7 +17,7 @@
  * GameObjects (Kraeuter, Erz, Truhen) bleiben unberuehrt, ebenso Auktionen,
  * Post, Kalender und die Weltzeit.
  *
- * Siehe docs/freeze-konzept.md fuer die ausfuehrliche Begruendung.
+ * Siehe README.md des Moduls fuer die ausfuehrliche Begruendung.
  */
 
 #include "Config.h"

@@ -7,7 +7,7 @@
  * Warum ein Modul und nicht mail_server_template: Jenes stellt bei jedem
  * Login zu und traegt den Charakter danach in mail_server_character ein.
  * Auf einem Server mit Playerbots betrifft das saemtliche Bot-Charaktere,
- * hier rund 1500 gegenueber zwei echten. Das waeren zehntausende erzeugte
+ * oft Tausende gegenueber wenigen echten. Das waeren zehntausende erzeugte
  * Gegenstaende in Bot-Postfaechern. OnPlayerCreate loest dagegen nur bei
  * tatsaechlicher Neuerstellung aus; bestehende Charaktere bleiben damit
  * unberuehrt, ohne dass man sie vorher eintragen muesste.
