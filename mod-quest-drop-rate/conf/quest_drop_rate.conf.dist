@@ -1,0 +1,33 @@
+[worldserver]
+
+########################################
+# mod-quest-drop-rate
+#
+# Erhöht nur die Dropchance echter Questgegenstände (QuestRequired = 1 in den
+# *_loot_template-Tabellen). Gilt für jede Loot-Art, auch für Angeln.
+#
+# Unverändert bleiben normales Loot, Referenzen, Gegenstände ohne
+# Quest-Anforderung und alle Rate.Drop.Item.*-Werte der worldserver.conf.
+# Questgegenstände in Loot-Gruppen, die auch normale Gegenstände enthalten,
+# bleiben ebenfalls unverändert, weil dort jede zusätzliche Chance den
+# anderen Gegenständen der Gruppe abgezogen würde.
+########################################
+
+#
+#    QuestDropRate.Enable
+#        Beschreibung: Modul ein- oder ausschalten.
+#        Vorgabe:      1
+#
+
+QuestDropRate.Enable = 1
+
+#
+#    QuestDropRate.Multiplier
+#        Beschreibung: Faktor für die Dropchance von Questgegenständen,
+#                      begrenzt auf 100 %. Werte unter 1 gelten als ungültig
+#                      und lassen die Chancen unverändert.
+#        Beispiel:     2.0 macht aus 40 % eine Chance von 80 %, aus 60 % 100 %.
+#        Vorgabe:      2.0
+#
+
+QuestDropRate.Multiplier = 2.0
