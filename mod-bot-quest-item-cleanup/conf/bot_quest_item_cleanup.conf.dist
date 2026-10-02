@@ -1,0 +1,22 @@
+[worldserver]
+
+########################################
+# mod-bot-quest-item-cleanup
+#
+# Removes the item a quest hands out on accept (quest_template.StartItem) from
+# a bot's bags once the bot is rewarded for that quest. The core only takes
+# the required items, so bots that finish quests without playing them keep
+# these items forever.
+#
+# Only items of class Quest or with quest binding are removed, and only when
+# no other quest in the bot's log still needs them. Real players and selfbots
+# are never touched.
+########################################
+
+#
+#    BotQuestItemCleanup.Enable
+#        Description: Turn the module on or off.
+#        Default:     1
+#
+
+BotQuestItemCleanup.Enable = 1

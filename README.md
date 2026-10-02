@@ -15,6 +15,7 @@ core stays unpatched, and every module can be installed on its own.
 | [mod-group-speed](mod-group-speed/) | `.group speed` command for the whole party or raid, faster ghosts |
 | [mod-welcome-promos](mod-welcome-promos/) | Configurable one-time welcome mail with promotional rewards |
 | [mod-out-of-combat-mana](mod-out-of-combat-mana/) | Configurable out-of-combat mana regeneration for players and their Playerbots |
+| [mod-bot-quest-item-cleanup](mod-bot-quest-item-cleanup/) | Removes leftover quest source items from Playerbot bags when a quest is rewarded |
 
 ### mod-quest-drop-rate
 
@@ -52,6 +53,14 @@ Configurable out-of-combat mana regeneration. Multiplies the mana regeneration t
 core already grants while a player is out of combat, keeps the five-second rule
 intact and supports Players and Playerbots: bots in a group or raid with a real
 player benefit, free-roaming random bots stay at normal regeneration.
+
+### mod-bot-quest-item-cleanup
+
+Playerbot quest item cleanup. When a bot is rewarded for a quest, the item that
+quest handed out on accept (empty phials, sampling tubes, clue notes) is removed
+from its bags. Bots that finish quests without playing them, for example with
+`AiPlayerbot.SyncQuestWithPlayer`, otherwise keep these unsellable items forever.
+Real players are never touched.
 
 ## Compatibility
 
