@@ -71,7 +71,7 @@ Real players are never touched.
 - The hooks used by these modules also exist in upstream AzerothCore `master`;
   that combination is not tested regularly.
 - [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots) is optional.
-  Bots are recognised through `WorldSession::IsBot()`, so no module includes
+  Bots are recognised through `WorldSession::IsHeadless()`, so no module includes
   Playerbot headers.
 
 ## Installation

@@ -210,13 +210,13 @@ namespace
     }
 
     // Counts logged-in humans. Bot sessions have no socket and identify
-    // themselves through WorldSession::IsBot(); they are not counted.
+    // themselves through WorldSession::IsHeadless(); they are not counted.
     uint32 CountHumanPlayers(Player const* excluded)
     {
         uint32 count = 0;
         for (auto const& [accountId, session] : sWorldSessionMgr->GetAllSessions())
         {
-            if (!session || session->IsBot())
+            if (!session || session->IsHeadless())
                 continue;
 
             Player* player = session->GetPlayer();
@@ -231,7 +231,7 @@ namespace
 
     bool IsHuman(Player const* player)
     {
-        return player && player->GetSession() && !player->GetSession()->IsBot();
+        return player && player->GetSession() && !player->GetSession()->IsHeadless();
     }
 }
 

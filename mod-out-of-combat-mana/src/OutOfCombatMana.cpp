@@ -7,7 +7,7 @@
  * Rate.Mana, rage, energy, runic power, pets and creatures stay unchanged as
  * well.
  *
- * Bots are recognised through WorldSession::IsBot(), which mod-playerbots sets
+ * Bots are recognised through WorldSession::IsHeadless(), which mod-playerbots sets
  * for its sessions; selfbots run on the client session and count as real
  * players. The module therefore needs no Playerbot headers. In battlegrounds
  * the original group counts, not the battleground raid.
@@ -71,7 +71,7 @@ namespace
     {
         for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
             if (Player* member = ref->GetSource())
-                if (WorldSession* session = member->GetSession(); session && !session->IsBot())
+                if (WorldSession* session = member->GetSession(); session && !session->IsHeadless())
                     return true;
 
         return false;
@@ -159,7 +159,7 @@ public:
 
         // Bots without a group (most random bots) drop out before CustomData
         // is looked up.
-        bool isBot = player->GetSession()->IsBot();
+        bool isBot = player->GetSession()->IsHeadless();
         Group* group = isBot ? RelevantGroup(player) : nullptr;
         if (isBot && !group)
             return;

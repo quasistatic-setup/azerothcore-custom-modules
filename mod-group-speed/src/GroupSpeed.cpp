@@ -123,7 +123,7 @@ public:
 
             // Human members are told, like with .modify speed all; bots are
             // not, the message would go unread there.
-            if (!member->GetSession()->IsBot() && handler->needReportToTarget(member))
+            if (!member->GetSession()->IsHeadless() && handler->needReportToTarget(member))
                 ChatHandler(member->GetSession()).PSendSysMessage(LANG_YOURS_ASPEED_CHANGED, handler->GetNameLink(), speed);
         }
 

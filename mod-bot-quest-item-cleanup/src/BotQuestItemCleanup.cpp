@@ -16,7 +16,7 @@
  * another quest in the bot's log still needs it, hands it out itself, or when
  * it starts a quest the bot has not been rewarded for yet.
  *
- * Bots are recognised through WorldSession::IsBot(), which mod-playerbots sets
+ * Bots are recognised through WorldSession::IsHeadless(), which mod-playerbots sets
  * for its sessions; selfbots run on the client session and count as real
  * players. The module therefore needs no Playerbot headers. Real players are
  * never touched.
@@ -98,7 +98,7 @@ public:
             return;
 
         WorldSession* session = player->GetSession();
-        if (!session || !session->IsBot())
+        if (!session || !session->IsHeadless())
             return;
 
         uint32 itemId = quest->GetSrcItemId();

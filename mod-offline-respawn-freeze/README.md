@@ -37,7 +37,7 @@ still carries the parked value gets its remaining time back from now on. Whateve
 the bots kill in the meantime is not parked and respawns normally.
 
 No attribution by killer is needed. Bot sessions do not count as players
-(`WorldSession::IsBot()`); only the last logout and the first login of a human
+(`WorldSession::IsHeadless()`); only the last logout and the first login of a human
 count. The approach therefore suits a single player or a single player group.
 
 ## Not affected

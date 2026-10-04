@@ -24,7 +24,7 @@ the bags for good.
   a use of its own is never touched.
 - The item stays when another quest in the bot's log still needs it or hands it out
   itself, and when it starts a quest the bot has not been rewarded for yet.
-- Bots are recognised through `WorldSession::IsBot()`, without Playerbot headers.
+- Bots are recognised through `WorldSession::IsHeadless()`, without Playerbot headers.
   Real players and selfbots are never touched.
 - Items that are already in the bags from earlier quests are not cleaned up
   retroactively; the module only acts at the moment of the reward.

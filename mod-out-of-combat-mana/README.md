@@ -19,7 +19,7 @@ core patch.
   the core.
 - Unchanged: `Rate.Mana`, rage, energy, runic power, as well as pets, guardians and
   creatures.
-- Bots are recognised through `WorldSession::IsBot()`, without Playerbot headers.
+- Bots are recognised through `WorldSession::IsHeadless()`, without Playerbot headers.
   Selfbots count as real players. A bot gets the bonus while a real player is
   online in its group or raid; this is checked at most once per second. In
   battlegrounds the original group counts, not the battleground raid.
