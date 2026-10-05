@@ -1,6 +1,6 @@
 # AzerothCore Custom Modules
 
-Custom AzerothCore WotLK modules for quest drop rates, group speed, offline respawn handling, mana regeneration, welcome rewards and Playerbot-oriented gameplay tweaks.
+Custom AzerothCore WotLK modules for quest drop rates, group speed, offline respawn handling, mana regeneration, welcome rewards, lockpicking for priests and Playerbot-oriented gameplay tweaks.
 
 Each folder in this repository is a self-contained AzerothCore module for World of
 Warcraft 3.3.5a (Wrath of the Lich King). The modules use only script hooks, so the
@@ -16,6 +16,7 @@ core stays unpatched, and every module can be installed on its own.
 | [mod-welcome-promos](mod-welcome-promos/) | Configurable one-time welcome mail with promotional rewards |
 | [mod-out-of-combat-mana](mod-out-of-combat-mana/) | Configurable out-of-combat mana regeneration for players and their Playerbots |
 | [mod-bot-quest-item-cleanup](mod-bot-quest-item-cleanup/) | Removes leftover quest source items from Playerbot bags when a quest is rewarded |
+| [mod-priest-lockpicking](mod-priest-lockpicking/) | Pick Lock and the Lockpicking skill for priests, with the core's spell validation left on |
 
 ### mod-quest-drop-rate
 
@@ -61,6 +62,14 @@ quest handed out on accept (empty phials, sampling tubes, clue notes) is removed
 from its bags. Bots that finish quests without playing them, for example with
 `AiPlayerbot.SyncQuestWithPlayer`, otherwise keep these unsellable items forever.
 Real players are never touched.
+
+### mod-priest-lockpicking
+
+Lockpicking for priests. Every priest that is not a random bot knows Pick Lock and
+has the Lockpicking skill at 450/450. The core removes a class-foreign skill, its
+spell and the action bar button on every login; the module grants them again
+through login hooks instead of storing them, so `ValidateSkillLearnedBySpells = 1`
+stays on and neither DBC nor database changes are needed.
 
 ## Compatibility
 
