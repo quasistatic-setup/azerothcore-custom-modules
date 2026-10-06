@@ -42,8 +42,13 @@ namespace
 {
     std::atomic<bool> g_enabled{true};
 
-    // Another quest in the log hands out the same item on accept.
-    bool IsSourceItemOfActiveQuest(Player* player, uint32 itemId, uint32 excludeQuestId)
+    // Another quest in the log hands out the same item on accept, asks for it
+    // as an objective or lists it as a source item.
+    //
+    // Player::HasQuestForItem cannot answer this: with turnIn set it compares
+    // item counters without comparing the item id and so reports true for
+    // almost any other quest in the log.
+    bool IsNeededByOtherQuest(Player* player, uint32 itemId, uint32 excludeQuestId)
     {
         for (uint8 slot = 0; slot < MAX_QUEST_LOG_SIZE; ++slot)
         {
@@ -51,8 +56,19 @@ namespace
             if (!questId || questId == excludeQuestId)
                 continue;
 
-            if (Quest const* quest = sObjectMgr->GetQuestTemplate(questId))
-                if (quest->GetSrcItemId() == itemId)
+            Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
+            if (!quest)
+                continue;
+
+            if (quest->GetSrcItemId() == itemId)
+                return true;
+
+            for (uint32 requiredItem : quest->RequiredItemId)
+                if (requiredItem == itemId)
+                    return true;
+
+            for (uint32 sourceItem : quest->ItemDrop)
+                if (sourceItem == itemId)
                     return true;
         }
 
@@ -115,7 +131,7 @@ public:
         if (proto->StartQuest && proto->StartQuest != questId && !player->GetQuestRewardStatus(proto->StartQuest))
             return;
 
-        if (player->HasQuestForItem(itemId, questId, true) || IsSourceItemOfActiveQuest(player, itemId, questId))
+        if (IsNeededByOtherQuest(player, itemId, questId))
             return;
 
         uint32 count = player->GetItemCount(itemId, true);
