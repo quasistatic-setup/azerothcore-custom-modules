@@ -1,0 +1,32 @@
+[worldserver]
+
+########################################
+# mod-bot-inventory
+#
+# .botinv commands for a player and the Playerbots in the same party or raid:
+# list all bags and equipment, move items and money directly between them
+# without a trade window, and apply profession enchants to any of their items.
+#
+# Real players other than the caller are never touched. Soulbound and quest
+# items stay where they are, nobody may be in combat or in a trade, and
+# enchants cost the enchanter's reagents as usual.
+########################################
+
+#
+#    BotInventory.Enable
+#        Description: Turn the .botinv commands on or off.
+#        Default:     1
+#
+
+BotInventory.Enable = 1
+
+#
+#    BotInventory.MaxDistance
+#        Description: Largest distance in yards between the two characters of
+#                     a transfer or an enchant. Both must be on the same map.
+#                     0 turns the check off, so a bot anywhere in the world
+#                     can take part.
+#        Default:     0
+#
+
+BotInventory.MaxDistance = 0

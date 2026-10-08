@@ -1,6 +1,6 @@
 # AzerothCore Custom Modules
 
-Custom AzerothCore WotLK modules for quest drop rates, group speed, offline respawn handling, mana regeneration, welcome rewards, lockpicking for priests and Playerbot-oriented gameplay tweaks.
+Custom AzerothCore WotLK modules for quest drop rates, group speed, offline respawn handling, mana regeneration, welcome rewards, lockpicking for priests, Playerbot inventory management and Playerbot-oriented gameplay tweaks.
 
 Each folder in this repository is a self-contained AzerothCore module for World of
 Warcraft 3.3.5a (Wrath of the Lich King). The modules use only script hooks, so the
@@ -17,6 +17,7 @@ core stays unpatched, and every module can be installed on its own.
 | [mod-out-of-combat-mana](mod-out-of-combat-mana/) | Configurable out-of-combat mana regeneration for players and their Playerbots |
 | [mod-bot-quest-item-cleanup](mod-bot-quest-item-cleanup/) | Removes leftover quest source items from Playerbot bags when a quest is rewarded |
 | [mod-priest-lockpicking](mod-priest-lockpicking/) | Pick Lock and the Lockpicking skill for priests, with the core's spell validation left on |
+| [mod-bot-inventory](mod-bot-inventory/) | `.botinv` commands to move items and gold between you and your Playerbots and to enchant their gear, without trade windows |
 
 ### mod-quest-drop-rate
 
@@ -70,6 +71,14 @@ has the Lockpicking skill at 450/450. The core removes a class-foreign skill, it
 spell and the action bar button on every login; the module grants them again
 through login hooks instead of storing them, so `ValidateSkillLearnedBySpells = 1`
 stays on and neither DBC nor database changes are needed.
+
+### mod-bot-inventory
+
+Playerbot inventory management without trade windows. `.botinv` lists the bags,
+equipment and money of you and the bots in your party or raid, moves items and gold
+directly between them and applies profession enchants to any of their items. The
+output is line based and reaches a client addon through AzerothCore's addon command
+channel, so an addon can show every inventory in one window.
 
 ## Compatibility
 
