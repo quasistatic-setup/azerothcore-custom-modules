@@ -7,6 +7,8 @@
  *   .botinv list                                  bags, equipment and money
  *   .botinv move <from> <to> <itemGuid>...        move whole stacks
  *   .botinv gold <from> <to> <copper>             move money
+ *   .botinv sell <owner> <itemGuid>...            sell stacks at the targeted vendor
+ *   .botinv destroy <owner> <itemGuid>...         destroy stacks
  *   .botinv enchants <owner> <itemGuid>           enchants available for an item
  *   .botinv enchant <caster> <spell> <owner> <itemGuid>
  *
@@ -24,6 +26,10 @@
  * Transfers follow the trade window: Item::CanBeTraded, no quest-bound items,
  * CanStoreItem on the receiver, and both inventories saved in one transaction.
  *
+ * Selling pays the vendor price to the item's owner, as the vendor window
+ * would; the caller must stand at a vendor and have it targeted, the bot may
+ * be anywhere. There is no buyback.
+ *
  * Enchants are applied the way Spell::EffectEnchantItemPerm does it, without
  * casting the spell. A real cast cannot target an item in somebody else's
  * bags: SpellCastTargets::Update only resolves the caster's own items or a
@@ -35,6 +41,7 @@
 #include "Chat.h"
 #include "CommandScript.h"
 #include "Config.h"
+#include "Creature.h"
 #include "DBCStores.h"
 #include "DatabaseEnv.h"
 #include "Group.h"
@@ -428,6 +435,8 @@ public:
             { "list",     HandleListCommand,     SEC_PLAYER, Console::No },
             { "move",     HandleMoveCommand,     SEC_PLAYER, Console::No },
             { "gold",     HandleGoldCommand,     SEC_PLAYER, Console::No },
+            { "sell",     HandleSellCommand,     SEC_PLAYER, Console::No },
+            { "destroy",  HandleDestroyCommand,  SEC_PLAYER, Console::No },
             { "enchants", HandleEnchantsCommand, SEC_PLAYER, Console::No },
             { "enchant",  HandleEnchantCommand,  SEC_PLAYER, Console::No }
         };
@@ -537,6 +546,106 @@ public:
             SavePair(from, to);
 
         return true;
+    }
+
+    // Shared frame of sell and destroy: resolves the owner and walks the
+    // guids. `act` handles one bag item and returns the reason it refused,
+    // or nullptr when the item is gone.
+    template <typename Action>
+    static bool ForEachBagItem(ChatHandler* handler, std::string const& ownerName, std::string_view guids, Action&& act)
+    {
+        Player* caller = GetCaller(handler);
+        if (!caller)
+            return false;
+
+        Player* owner = GetParticipant(handler, caller, ownerName);
+        if (!owner)
+            return false;
+
+        if (!CheckPair(handler, owner, owner))
+            return false;
+
+        std::vector<std::string_view> tokens = Acore::Tokenize(guids, ' ', false);
+        if (tokens.empty())
+            return Fail(handler, "No item given.");
+
+        uint32 done = 0;
+        for (std::string_view token : tokens)
+        {
+            Item* item = FindItem(owner, token);
+            char const* reason = nullptr;
+            if (!item)
+                reason = "not found";
+            else if (!Player::IsInventoryPos(item->GetPos()))
+                reason = "is not in a bag";
+            else if (item->IsNotEmptyBag())
+                reason = "is a bag with content";
+            else
+                reason = act(caller, owner, item);
+
+            if (reason)
+            {
+                handler->SendSysMessage(Acore::StringFormat("M~{}~0~{}", token, reason));
+                continue;
+            }
+
+            handler->SendSysMessage(Acore::StringFormat("M~{}~1~", token));
+            ++done;
+        }
+
+        if (done)
+            SavePair(owner, owner);
+
+        return true;
+    }
+
+    static bool HandleSellCommand(ChatHandler* handler, std::string ownerName, Tail guids)
+    {
+        Player* caller = handler->GetPlayer();
+        Creature* vendor = caller ? caller->GetNPCIfCanInteractWith(caller->GetTarget(), UNIT_NPC_FLAG_VENDOR) : nullptr;
+        if (!vendor || vendor->HasFlagsExtra(CREATURE_FLAG_EXTRA_NO_SELL_VENDOR))
+            return Fail(handler, "Target a vendor next to you first.");
+
+        uint32 total = 0;
+        bool result = ForEachBagItem(handler, ownerName, guids, [&](Player* who, Player* owner, Item* item) -> char const*
+        {
+            ItemTemplate const* proto = item->GetTemplate();
+            if (!proto->SellPrice)
+                return "has no vendor price";
+
+            uint32 count = item->GetCount();
+            uint32 money = proto->SellPrice * count;
+            if (owner->GetMoney() > MAX_MONEY_AMOUNT - money)
+                return "owner cannot carry more money";
+
+            uint32 entry = item->GetEntry();
+            owner->DestroyItem(item->GetBagSlot(), item->GetSlot(), true);
+            owner->ModifyMoney(int32(money));
+            total += money;
+
+            LOG_INFO("module", "[BotInventory] {}: sold {}x item {} of {} for {} copper.",
+                who->GetName(), count, entry, owner->GetName(), money);
+            return nullptr;
+        });
+
+        if (total)
+            handler->SendSysMessage(Acore::StringFormat("T~{}", total));
+
+        return result;
+    }
+
+    static bool HandleDestroyCommand(ChatHandler* handler, std::string ownerName, Tail guids)
+    {
+        return ForEachBagItem(handler, ownerName, guids, [](Player* who, Player* owner, Item* item) -> char const*
+        {
+            uint32 entry = item->GetEntry();
+            uint32 count = item->GetCount();
+            owner->DestroyItem(item->GetBagSlot(), item->GetSlot(), true);
+
+            LOG_INFO("module", "[BotInventory] {}: destroyed {}x item {} of {}.",
+                who->GetName(), count, entry, owner->GetName());
+            return nullptr;
+        });
     }
 
     static bool HandleGoldCommand(ChatHandler* handler, std::string fromName, std::string toName, uint32 copper)

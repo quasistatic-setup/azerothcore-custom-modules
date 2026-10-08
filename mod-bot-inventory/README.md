@@ -3,7 +3,8 @@
 mod-bot-inventory is an AzerothCore WotLK module for managing the inventories of the
 Playerbots in your party or raid without trade windows. Its `.botinv` commands list
 the bags, equipment and money of you and your bots, move items and gold directly
-between them, and apply profession enchants to any of their items. It is a plain
+between them, sell or destroy their items, and apply profession enchants to any of
+their items. It is a plain
 `CommandScript`, without a core patch and without Playerbot headers.
 
 ## Why
@@ -24,6 +25,8 @@ names are your own character and bots in your group.
 | `.botinv list` | Bags, equipment, money and free slots of you and every bot in your group |
 | `.botinv move <from> <to> <itemGuid> [<itemGuid> ...]` | Moves whole stacks from one character's bags to another's |
 | `.botinv gold <from> <to> <copper>` | Moves money |
+| `.botinv sell <owner> <itemGuid> [<itemGuid> ...]` | Sells whole stacks from that character's bags at the vendor you have targeted; the owner gets the money |
+| `.botinv destroy <owner> <itemGuid> [<itemGuid> ...]` | Destroys whole stacks in that character's bags |
 | `.botinv enchants <owner> <itemGuid>` | Lists, per group member, the enchants they know that fit this item |
 | `.botinv enchant <caster> <spellId> <owner> <itemGuid>` | Applies that enchant |
 
@@ -39,6 +42,10 @@ names are your own character and bots in your group.
   items, no bags with content, only from bags (not from equipment or bank), and the
   receiver must have room and be allowed to carry the item. Both inventories are
   saved in one database transaction.
+- Selling needs a vendor in interaction range as your target; the bot whose item is
+  sold can be anywhere. The owner receives the vendor price. There is no buyback.
+- Destroying has no confirmation and cannot be undone; an addon should ask first.
+  Soulbound and quest items can be sold and destroyed like in the normal bag.
 - Enchants follow the checks of a normal cast: the enchanter must know the spell,
   the item must fit (class, slot, level), reagents and tools must be in the
   enchanter's bags. Reagents are consumed and the skill-up roll happens as usual.
@@ -57,7 +64,8 @@ Long lists are split over several lines with the same head.
 |---|---|
 | `P~<name>~<classId>~<copper>~<freeSlots>~<isCaller>` | One character, followed by its item lines |
 | `I~<name>~<bag>,<slot>,<entry>,<count>,<itemGuid>,<enchantId>,<randomPropertyId>,<flags>;...` | Items; bag 255 with slot 0 to 18 is equipment; flag 1 means the item can be moved |
-| `M~<itemGuid>~<1 or 0>~<reason>` | Result of one item of a move |
+| `M~<itemGuid>~<1 or 0>~<reason>` | Result of one item of a move, sale or destroy |
+| `T~<copper>` | Total a sale paid |
 | `G~<from>~<to>~<copper>` | Money was moved |
 | `C~<caster>~<spellId>,<1 or 0>,<missing>;...` | Enchants a caster knows for the item; 1 means reagents and tools are complete, otherwise `<missing>` names what the caster lacks, in the caller's language |
 | `X~<caster>~<spellId>~<owner>~<itemGuid>` | Enchant was applied |
