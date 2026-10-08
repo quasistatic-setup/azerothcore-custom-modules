@@ -22,11 +22,12 @@ names are your own character and bots in your group.
 
 | Command | Effect |
 |---|---|
-| `.botinv list` | Bags, equipment, money and free slots of you and every bot in your group |
+| `.botinv list` | Bags, equipment, money, free slots, level, talent points and professions of you and every bot in your group |
 | `.botinv move <from> <to> <itemGuid> [<itemGuid> ...]` | Moves whole stacks from one character's bags to another's |
 | `.botinv gold <from> <to> <copper>` | Moves money |
 | `.botinv sell <owner> <itemGuid> [<itemGuid> ...]` | Sells whole stacks from that character's bags at the vendor you have targeted; the owner gets the money |
 | `.botinv destroy <owner> <itemGuid> [<itemGuid> ...]` | Destroys whole stacks in that character's bags |
+| `.botinv equipbag <owner> <itemGuid> <slot>` | Puts a bag from that character's bags into bag slot 0 to 3; the content of the bag it replaces moves over |
 | `.botinv enchants <owner> <itemGuid>` | Lists, per group member, the enchants they know that fit this item |
 | `.botinv enchant <caster> <spellId> <owner> <itemGuid>` | Applies that enchant |
 
@@ -46,6 +47,9 @@ names are your own character and bots in your group.
   sold can be anywhere. The owner receives the vendor price. There is no buyback.
 - Destroying has no confirmation and cannot be undone; an addon should ask first.
   Soulbound and quest items can be sold and destroyed like in the normal bag.
+- A bag goes into a bag slot the way a drag in the client does it: the bag it
+  replaces lands in the bags, and its content moves into the new bag, which must be
+  large enough.
 - Enchants follow the checks of a normal cast: the enchanter must know the spell,
   the item must fit (class, slot, level), reagents and tools must be in the
   enchanter's bags. Reagents are consumed and the skill-up roll happens as usual.
@@ -63,10 +67,14 @@ Long lists are split over several lines with the same head.
 | Line | Meaning |
 |---|---|
 | `P~<name>~<classId>~<copper>~<freeSlots>~<isCaller>` | One character, followed by its item lines |
+| `S~<name>~<level>~<points1>~<points2>~<points3>` | Level and talent points per tree of the active spec |
+| `K~<name>~<primary 1 or 0>,<value>,<max>,<skillName>;...` | Professions, named in the caller's language |
+| `G~<name>~<bagSlot>,<entry>,<itemGuid>,<size>,<freeSlots>;...` | Equipped bags in bag slots 0 to 3; empty slots are left out |
 | `I~<name>~<bag>,<slot>,<entry>,<count>,<itemGuid>,<enchantId>,<randomPropertyId>,<flags>;...` | Items; bag 255 with slot 0 to 18 is equipment; flag 1 means the item can be moved |
 | `M~<itemGuid>~<1 or 0>~<reason>` | Result of one item of a move, sale or destroy |
 | `T~<copper>` | Total a sale paid |
-| `G~<from>~<to>~<copper>` | Money was moved |
+| `G~<from>~<to>~<copper>` | Money was moved (reply to `.botinv gold`) |
+| `B~<owner>~<bagSlot>~<itemGuid>` | Bag was equipped |
 | `C~<caster>~<spellId>,<1 or 0>,<missing>;...` | Enchants a caster knows for the item; 1 means reagents and tools are complete, otherwise `<missing>` names what the caster lacks, in the caller's language |
 | `X~<caster>~<spellId>~<owner>~<itemGuid>` | Enchant was applied |
 

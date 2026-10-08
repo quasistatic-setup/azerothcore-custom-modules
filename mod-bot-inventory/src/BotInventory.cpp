@@ -4,11 +4,12 @@
  * .botinv commands that let a player manage the bags, money and enchants of
  * the Playerbots in their party or raid without opening trade windows:
  *
- *   .botinv list                                  bags, equipment and money
+ *   .botinv list                                  bags, equipment, money, talents, professions
  *   .botinv move <from> <to> <itemGuid>...        move whole stacks
  *   .botinv gold <from> <to> <copper>             move money
  *   .botinv sell <owner> <itemGuid>...            sell stacks at the targeted vendor
  *   .botinv destroy <owner> <itemGuid>...         destroy stacks
+ *   .botinv equipbag <owner> <itemGuid> <slot>    put a bag from the bags into bag slot 0..3
  *   .botinv enchants <owner> <itemGuid>           enchants available for an item
  *   .botinv enchant <caster> <spell> <owner> <itemGuid>
  *
@@ -29,6 +30,10 @@
  * Selling pays the vendor price to the item's owner, as the vendor window
  * would; the caller must stand at a vendor and have it targeted, the bot may
  * be anywhere. There is no buyback.
+ *
+ * Equipping a bag goes through Player::SwapItem, the function behind a drag
+ * in the client. It already moves the content of the bag being replaced into
+ * the new one and refuses when that does not fit.
  *
  * Enchants are applied the way Spell::EffectEnchantItemPerm does it, without
  * casting the spell. A real cast cannot target an item in somebody else's
@@ -215,6 +220,16 @@ namespace
         std::string _line;
     };
 
+    // Keeps free text from breaking the '~', ';' and ',' separated records.
+    std::string RecordText(std::string text)
+    {
+        for (char& c : text)
+            if (c == '~' || c == ';' || c == ',')
+                c = ' ';
+
+        return text;
+    }
+
     void AddItemRecord(LineWriter& writer, Item const* item)
     {
         uint32 flags = MoveBlockReason(item) ? 0 : FLAG_MOVABLE;
@@ -225,11 +240,63 @@ namespace
             item->GetItemRandomPropertyId(), flags));
     }
 
+    // Level, talent points per tree of the active spec and professions.
+    void SendCharacterInfo(ChatHandler* handler, Player* player)
+    {
+        uint32 points[3] = { 0, 0, 0 };
+        for (uint32 i = 0; i < sTalentStore.GetNumRows(); ++i)
+        {
+            TalentEntry const* talent = sTalentStore.LookupEntry(i);
+            if (!talent)
+                continue;
+
+            TalentTabEntry const* tab = sTalentTabStore.LookupEntry(talent->TalentTab);
+            if (!tab || !(tab->ClassMask & player->getClassMask()) || tab->tabpage > 2)
+                continue;
+
+            for (int8 rank = MAX_TALENT_RANK - 1; rank >= 0; --rank)
+                if (talent->RankID[rank] && player->HasTalent(talent->RankID[rank], player->GetActiveSpec()))
+                {
+                    points[tab->tabpage] += rank + 1;
+                    break;
+                }
+        }
+
+        handler->SendSysMessage(Acore::StringFormat("S~{}~{}~{}~{}~{}",
+            player->GetName(), player->GetLevel(), points[0], points[1], points[2]));
+
+        LineWriter skills(handler, "K~" + player->GetName() + "~");
+        LocaleConstant locale = handler->GetSessionDbcLocale();
+        for (auto const& [skillId, status] : player->GetSkillStatusMap())
+        {
+            if (status.uState == SKILL_DELETED || skillId == SKILL_RIDING)
+                continue;
+
+            SkillLineEntry const* skill = sSkillLineStore.LookupEntry(skillId);
+            if (!skill || (skill->categoryId != SKILL_CATEGORY_PROFESSION && skill->categoryId != SKILL_CATEGORY_SECONDARY))
+                continue;
+
+            skills.Add(Acore::StringFormat("{},{},{},{}", skill->categoryId == SKILL_CATEGORY_PROFESSION ? 1 : 0,
+                player->GetPureSkillValue(skillId), player->GetPureMaxSkillValue(skillId),
+                RecordText(skill->name[locale] ? skill->name[locale] : "")));
+        }
+    }
+
     void SendInventory(ChatHandler* handler, Player* caller, Player* player)
     {
         handler->SendSysMessage(Acore::StringFormat("P~{}~{}~{}~{}~{}",
             player->GetName(), player->getClass(), player->GetMoney(), player->GetFreeInventorySpace(),
             player == caller ? 1 : 0));
+
+        SendCharacterInfo(handler, player);
+
+        {
+            LineWriter bags(handler, "G~" + player->GetName() + "~");
+            for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+                if (Bag* bag = player->GetBagByPos(bagSlot))
+                    bags.Add(Acore::StringFormat("{},{},{},{},{}", bagSlot - INVENTORY_SLOT_BAG_START,
+                        bag->GetEntry(), bag->GetGUID().GetCounter(), bag->GetBagSize(), bag->GetFreeSlots()));
+        }
 
         LineWriter writer(handler, "I~" + player->GetName() + "~");
 
@@ -411,16 +478,6 @@ namespace
 
         return missing;
     }
-
-    // Keeps free text from breaking the '~', ';' and ',' separated records.
-    std::string RecordText(std::string text)
-    {
-        for (char& c : text)
-            if (c == '~' || c == ';' || c == ',')
-                c = ' ';
-
-        return text;
-    }
 }
 
 class bot_inventory_commandscript : public CommandScript
@@ -437,6 +494,7 @@ public:
             { "gold",     HandleGoldCommand,     SEC_PLAYER, Console::No },
             { "sell",     HandleSellCommand,     SEC_PLAYER, Console::No },
             { "destroy",  HandleDestroyCommand,  SEC_PLAYER, Console::No },
+            { "equipbag", HandleEquipBagCommand, SEC_PLAYER, Console::No },
             { "enchants", HandleEnchantsCommand, SEC_PLAYER, Console::No },
             { "enchant",  HandleEnchantCommand,  SEC_PLAYER, Console::No }
         };
@@ -646,6 +704,53 @@ public:
                 who->GetName(), count, entry, owner->GetName());
             return nullptr;
         });
+    }
+
+    static bool HandleEquipBagCommand(ChatHandler* handler, std::string ownerName, std::string guid, uint8 slot)
+    {
+        Player* caller = GetCaller(handler);
+        if (!caller)
+            return false;
+
+        Player* owner = GetParticipant(handler, caller, ownerName);
+        if (!owner)
+            return false;
+
+        if (!CheckPair(handler, owner, owner))
+            return false;
+
+        if (slot >= INVENTORY_SLOT_BAG_END - INVENTORY_SLOT_BAG_START)
+            return Fail(handler, "Bag slots are numbered 0 to 3.");
+
+        Item* item = FindItem(owner, guid);
+        if (!item)
+            return Fail(handler, "Item not found.");
+
+        if (!item->IsBag() || !Player::IsInventoryPos(item->GetPos()))
+            return Fail(handler, "That is not a bag in " + owner->GetName() + "'s bags.");
+
+        if (!owner->IsAlive())
+            return Fail(handler, owner->GetName() + " is dead.");
+
+        uint32 entry = item->GetEntry();
+        ObjectGuid itemGuid = item->GetGUID();
+        uint16 dst = (uint16(INVENTORY_SLOT_BAG_0) << 8) | (INVENTORY_SLOT_BAG_START + slot);
+
+        owner->SwapItem(item->GetPos(), dst);
+
+        // SwapItem only tells the owner's client why it refused; look at the result instead.
+        Item* now = owner->GetItemByPos(dst);
+        if (!now || now->GetGUID() != itemGuid)
+            return Fail(handler, "The bag could not be put there. It must hold everything the old bag contains "
+                "and suit the owner.");
+
+        SavePair(owner, owner);
+
+        handler->SendSysMessage(Acore::StringFormat("B~{}~{}~{}", owner->GetName(), slot, itemGuid.GetCounter()));
+        LOG_INFO("module", "[BotInventory] {}: {} equipped bag {} in bag slot {}.",
+            caller->GetName(), owner->GetName(), entry, slot);
+
+        return true;
     }
 
     static bool HandleGoldCommand(ChatHandler* handler, std::string fromName, std::string toName, uint32 copper)
