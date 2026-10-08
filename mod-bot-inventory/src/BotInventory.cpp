@@ -55,6 +55,7 @@
 
 #include <atomic>
 #include <optional>
+#include <unordered_map>
 
 using namespace Acore::ChatCommands;
 
@@ -334,13 +335,49 @@ namespace
         return nullptr;
     }
 
-    // Reagents and tools the enchanter is missing, empty when complete.
-    std::string MissingMaterials(Player const* caster, SpellInfo const* info)
+    std::string ItemName(uint32 itemId, int localeIndex)
+    {
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+        if (!proto)
+            return "item " + std::to_string(itemId);
+
+        std::string name = proto->Name1;
+        if (localeIndex >= 0)
+            if (ItemLocale const* locale = sObjectMgr->GetItemLocale(itemId))
+                ObjectMgr::GetLocaleString(locale->Name, localeIndex, name);
+
+        return name;
+    }
+
+    // An item that provides a tool category, to name the category by. The
+    // core does not load the category names of TotemCategory.dbc. The lowest
+    // entry wins so the answer does not depend on the order of the store.
+    uint32 GetToolItem(uint32 totemCategory)
+    {
+        // Commands run on the world thread only.
+        static std::unordered_map<uint32, uint32> cache;
+
+        auto cached = cache.find(totemCategory);
+        if (cached != cache.end())
+            return cached->second;
+
+        uint32 found = 0;
+        for (auto const& [itemId, proto] : *sObjectMgr->GetItemTemplateStore())
+            if (proto.TotemCategory == totemCategory && (!found || itemId < found))
+                found = itemId;
+
+        cache[totemCategory] = found;
+        return found;
+    }
+
+    // Reagents and tools the enchanter is missing, in the caller's language,
+    // empty when complete.
+    std::string MissingMaterials(Player const* caster, SpellInfo const* info, int localeIndex)
     {
         std::string missing;
         auto add = [&](std::string const& text)
         {
-            missing += (missing.empty() ? "" : ", ") + text;
+            missing += (missing.empty() ? "" : " + ") + text;
         };
 
         if (!caster->CanNoReagentCast(info))
@@ -350,25 +387,32 @@ namespace
                     continue;
 
                 uint32 itemId = info->Reagent[i];
-                if (caster->HasItemCount(itemId, info->ReagentCount[i]))
-                    continue;
-
-                ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
-                add(std::to_string(info->ReagentCount[i]) + "x " + (proto ? proto->Name1 : std::to_string(itemId)));
+                if (!caster->HasItemCount(itemId, info->ReagentCount[i]))
+                    add(std::to_string(info->ReagentCount[i]) + "x " + ItemName(itemId, localeIndex));
             }
 
         for (uint32 totem : info->Totem)
             if (totem && !caster->HasItemCount(totem))
-            {
-                ItemTemplate const* proto = sObjectMgr->GetItemTemplate(totem);
-                add(proto ? proto->Name1 : std::to_string(totem));
-            }
+                add(ItemName(totem, localeIndex));
 
         for (uint32 category : info->TotemCategory)
             if (category && !caster->HasItemTotemCategory(category))
-                add("the required tool");
+            {
+                uint32 tool = GetToolItem(category);
+                add(tool ? ItemName(tool, localeIndex) : "the required tool");
+            }
 
         return missing;
+    }
+
+    // Keeps free text from breaking the '~', ';' and ',' separated records.
+    std::string RecordText(std::string text)
+    {
+        for (char& c : text)
+            if (c == '~' || c == ';' || c == ',')
+                c = ' ';
+
+        return text;
     }
 }
 
@@ -559,7 +603,8 @@ public:
                 if (!spell || EnchantFitError(caster, owner, item, *spell))
                     continue;
 
-                writer.Add(Acore::StringFormat("{},{}", spellId, MissingMaterials(caster, spell->info).empty() ? 1 : 0));
+                std::string missing = MissingMaterials(caster, spell->info, handler->GetSessionDbLocaleIndex());
+                writer.Add(Acore::StringFormat("{},{},{}", spellId, missing.empty() ? 1 : 0, RecordText(missing)));
             }
         }
 
@@ -591,7 +636,7 @@ public:
         if (char const* reason = EnchantFitError(caster, owner, item, *spell))
             return Fail(handler, std::string("Enchant ") + reason + ".");
 
-        std::string missing = MissingMaterials(caster, spell->info);
+        std::string missing = MissingMaterials(caster, spell->info, handler->GetSessionDbLocaleIndex());
         if (!missing.empty())
             return Fail(handler, caster->GetName() + " is missing " + missing + ".");
 

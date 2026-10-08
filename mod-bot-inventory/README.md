@@ -59,7 +59,7 @@ Long lists are split over several lines with the same head.
 | `I~<name>~<bag>,<slot>,<entry>,<count>,<itemGuid>,<enchantId>,<randomPropertyId>,<flags>;...` | Items; bag 255 with slot 0 to 18 is equipment; flag 1 means the item can be moved |
 | `M~<itemGuid>~<1 or 0>~<reason>` | Result of one item of a move |
 | `G~<from>~<to>~<copper>` | Money was moved |
-| `C~<caster>~<spellId>,<1 or 0>;...` | Enchants a caster knows for the item; 1 means reagents and tools are complete |
+| `C~<caster>~<spellId>,<1 or 0>,<missing>;...` | Enchants a caster knows for the item; 1 means reagents and tools are complete, otherwise `<missing>` names what the caster lacks, in the caller's language |
 | `X~<caster>~<spellId>~<owner>~<itemGuid>` | Enchant was applied |
 
 Errors are plain sentences.
