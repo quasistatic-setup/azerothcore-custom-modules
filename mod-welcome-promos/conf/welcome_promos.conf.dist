@@ -75,7 +75,7 @@ WelcomePromos.Body = "Welcome to Azeroth! Attached you will find some special ke
 #        Description: Additional account prefixes that receive no mail,
 #                     comma-separated, case-insensitive.
 #                     The Playerbot account prefix is always excluded; it is
-#                     read from AiPlayerbot.RandomBotAccountPrefix so both
+#                     read from Playerbots.RandomBotAccountPrefix so both
 #                     sides cannot drift apart.
 #        Default:     "" (none)
 #

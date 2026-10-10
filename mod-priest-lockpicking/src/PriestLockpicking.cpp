@@ -37,13 +37,13 @@
  * Who gets it: real players, and characters that mod-playerbots logs in for a
  * player account (alt bots). Without the latter the core would delete the
  * Pick Lock button from the character's action bar whenever it is loaded as
- * a bot, for example through AiPlayerbot.BotAutologin. An alt bot with the
+ * a bot, for example through Playerbots.BotAutologin. An alt bot with the
  * skill also unlocks lockboxes it receives, because the "unlock items" action
  * of mod-playerbots only asks for the skill. Characters on random bot
  * accounts stay unchanged. Bots are recognised through
  * WorldSession::IsHeadless(), which mod-playerbots sets for its sessions, and
  * random bot accounts through the account name prefix from
- * AiPlayerbot.RandomBotAccountPrefix. The module therefore needs no Playerbot
+ * Playerbots.RandomBotAccountPrefix. The module therefore needs no Playerbot
  * headers. Real players never cause an account lookup.
  *
  * Cost: three hooks that run once per login or logout, none per update.
@@ -76,7 +76,11 @@ namespace
         if (!AccountMgr::GetName(accountId, name))
             return true;
 
-        std::string prefix = sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "rndbot");
+        // mod-playerbots renamed its configuration prefix from AiPlayerbot. to Playerbots.; the old key is still
+        // read so the module works with either version.
+        std::string prefix = sConfigMgr->GetOption<std::string>(
+            "Playerbots.RandomBotAccountPrefix",
+            sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "rndbot", false), false);
         if (prefix.empty())
             return false;
 

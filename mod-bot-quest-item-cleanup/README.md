@@ -11,7 +11,7 @@ phials, sampling tubes or clue notes. It works through the
 `Player::RewardQuest` takes the required items and the `ItemDrop` items of a quest,
 but not its source item. A player normally uses that item up while doing the quest.
 A bot that completes a quest without playing it never does. This happens with
-`AiPlayerbot.SyncQuestWithPlayer = 1` in
+`Playerbots.SyncQuestWithPlayer = 1` in
 [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots), where bots finish
 a quest the moment their master hands it in. The items cannot be sold and stay in
 the bags for good.

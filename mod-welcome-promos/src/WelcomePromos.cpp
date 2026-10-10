@@ -91,7 +91,11 @@ private:
         std::string upper = name;
         std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
 
-        std::string prefix = sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "rndbot");
+        // mod-playerbots renamed its configuration prefix from AiPlayerbot. to Playerbots.; the old key is still
+        // read so the module works with either version.
+        std::string prefix = sConfigMgr->GetOption<std::string>(
+            "Playerbots.RandomBotAccountPrefix",
+            sConfigMgr->GetOption<std::string>("AiPlayerbot.RandomBotAccountPrefix", "rndbot", false), false);
         std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::toupper);
         if (!prefix.empty() && upper.rfind(prefix, 0) == 0)
             return true;

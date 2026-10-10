@@ -7,7 +7,7 @@
  * Why this is needed: Player::RewardQuest takes the required items and the
  * ItemDrop items, but not the source item (quest_template.StartItem). A player
  * normally uses it up while doing the quest. A bot that completes a quest
- * without playing it, for example with AiPlayerbot.SyncQuestWithPlayer, never
+ * without playing it, for example with Playerbots.SyncQuestWithPlayer, never
  * uses it, so empty phials, sampling tubes and similar items pile up in its
  * bags for good.
  *

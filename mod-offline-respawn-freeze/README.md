@@ -26,7 +26,7 @@ The second part can be turned off with
 
 ## Why Playerbots do not interfere
 
-With `AiPlayerbot.RandomBotAutologin = 1` random bots play as soon as the
+With `Playerbots.RandomBotAutologin = 1` random bots play as soon as the
 worldserver runs, including while nobody sits at the computer. A global freeze
 would also freeze their kills and depopulate the world.
 

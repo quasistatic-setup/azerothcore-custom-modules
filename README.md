@@ -61,7 +61,7 @@ player benefit, free-roaming random bots stay at normal regeneration.
 Playerbot quest item cleanup. When a bot is rewarded for a quest, the item that
 quest handed out on accept (empty phials, sampling tubes, clue notes) is removed
 from its bags. Bots that finish quests without playing them, for example with
-`AiPlayerbot.SyncQuestWithPlayer`, otherwise keep these unsellable items forever.
+`Playerbots.SyncQuestWithPlayer`, otherwise keep these unsellable items forever.
 Real players are never touched.
 
 ### mod-priest-lockpicking

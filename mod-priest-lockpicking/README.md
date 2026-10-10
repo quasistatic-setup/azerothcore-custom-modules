@@ -47,12 +47,12 @@ database during loading. It is removed again before the logout save so that
 
 - Applies to real players and to characters that
   [mod-playerbots](https://github.com/mod-playerbots/mod-playerbots) logs in for a
-  player account (alt bots, for example through `AiPlayerbot.BotAutologin`). Without
+  player account (alt bots, for example through `Playerbots.BotAutologin`). Without
   the latter the core would delete the Pick Lock button whenever the priest is
   loaded as a bot. An alt bot with the skill also unlocks lockboxes it receives.
 - Characters on random bot accounts stay unchanged. They are recognised through
   `WorldSession::IsHeadless()` and the account name prefix from
-  `AiPlayerbot.RandomBotAccountPrefix`, without Playerbot headers. Real players
+  `Playerbots.RandomBotAccountPrefix`, without Playerbot headers. Real players
   never cause an account lookup.
 - Other classes, spells and skills are never touched. Lockpicking has Pick Lock as
   its only ability, and the spell teaches no skill.

@@ -27,7 +27,7 @@ The core calls the hook after the character creation has been committed, so the
 character exists in the database and sending mail is safe.
 
 Bot accounts are excluded. The prefix is read from
-`AiPlayerbot.RandomBotAccountPrefix` so both sides cannot drift apart (default
+`Playerbots.RandomBotAccountPrefix` so both sides cannot drift apart (default
 `rndbot` when mod-playerbots is not installed); further prefixes can be configured.
 
 ## Sent only once
