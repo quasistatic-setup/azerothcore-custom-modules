@@ -1,0 +1,20 @@
+[worldserver]
+
+########################################
+# mod-bot-quest-abandon
+#
+# When a real player abandons a quest, the bots in their party or raid that are
+# on the same map abandon it as well. Bots go through the same core handler as
+# a player, so quest and source items are taken back as usual.
+#
+# Selfbots count as real players. A bot that abandons a quest itself does not
+# pass it on.
+########################################
+
+#
+#    BotQuestAbandon.Enable
+#        Description: Turn the module on or off.
+#        Default:     1
+#
+
+BotQuestAbandon.Enable = 1

@@ -16,6 +16,7 @@ core stays unpatched, and every module can be installed on its own.
 | [mod-welcome-promos](mod-welcome-promos/) | Configurable one-time welcome mail with promotional rewards |
 | [mod-out-of-combat-mana](mod-out-of-combat-mana/) | Configurable out-of-combat mana regeneration for players and their Playerbots |
 | [mod-bot-quest-item-cleanup](mod-bot-quest-item-cleanup/) | Removes leftover quest source items from Playerbot bags when a quest is rewarded |
+| [mod-bot-quest-abandon](mod-bot-quest-abandon/) | Playerbots in your party or raid abandon a quest when you abandon it |
 | [mod-priest-lockpicking](mod-priest-lockpicking/) | Pick Lock and the Lockpicking skill for priests, with the core's spell validation left on |
 | [mod-bot-inventory](mod-bot-inventory/) | `.botinv` commands to move items and gold between you and your Playerbots and to enchant their gear, without trade windows |
 
@@ -63,6 +64,13 @@ quest handed out on accept (empty phials, sampling tubes, clue notes) is removed
 from its bags. Bots that finish quests without playing them, for example with
 `Playerbots.SyncQuestWithPlayer`, otherwise keep these unsellable items forever.
 Real players are never touched.
+
+### mod-bot-quest-abandon
+
+Playerbot quest abandon. When you abandon a quest, the bots in your party or raid
+on the same map abandon it as well, through the same core handler a client uses.
+Bots that took the quest over with `Playerbots.SyncQuestWithPlayer` otherwise keep
+it in their logs. One system message names the bots that followed.
 
 ### mod-priest-lockpicking
 
