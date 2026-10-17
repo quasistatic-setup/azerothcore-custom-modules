@@ -38,14 +38,63 @@
 #include "ScriptMgr.h"
 #include "WorldPacket.h"
 #include "WorldScript.h"
+#include "World.h"
 #include "WorldSession.h"
 
+#include <algorithm>
 #include <atomic>
+#include <sstream>
 #include <string>
+#include <vector>
 
 namespace
 {
     std::atomic<bool> g_enabled{true};
+
+    // Names listed in one message; the rest is only counted, so a raid stays
+    // within one chat line. Same layout as the quest group messages of
+    // mod-playerbots.
+    constexpr std::size_t MaxNamedBots = 5;
+
+    // Clickable quest link, built like ChatHelper::FormatQuest in mod-playerbots.
+    std::string QuestLink(uint32 questId)
+    {
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
+        if (!quest)
+            return "[" + std::to_string(questId) + "]";
+
+        std::string title;
+        if (QuestLocale const* locale = sObjectMgr->GetQuestLocale(questId))
+            if (locale->Title.size() > sWorld->GetDefaultDbcLocale())
+                title = locale->Title[sWorld->GetDefaultDbcLocale()];
+        if (title.empty())
+            title = quest->GetTitle();
+
+        std::ostringstream out;
+        out << "|cFFFFFF00|Hquest:" << questId << ':' << quest->GetQuestLevel() << "|h[" << title << "]|h|r";
+        return out.str();
+    }
+
+    // "Quest abandoned: [Quest] - Tank" for one bot,
+    // "Quest abandoned: [Quest] - 4 bots: Heal, Hunt, Mage, Tank" for several,
+    // names beyond MaxNamedBots as "+N".
+    std::string FormatMessage(uint32 questId, std::vector<std::string> names)
+    {
+        std::sort(names.begin(), names.end());
+        std::string message = "Quest abandoned: " + QuestLink(questId);
+
+        if (names.size() == 1)
+            return message + " - " + names.front();
+
+        std::size_t const named = std::min(names.size(), MaxNamedBots);
+        message += " - " + std::to_string(names.size()) + " bots";
+        for (std::size_t i = 0; i < named; ++i)
+            message += (i == 0 ? ": " : ", ") + names[i];
+        if (names.size() > named)
+            message += " +" + std::to_string(names.size() - named);
+
+        return message;
+    }
 
     bool IsBot(Player const* player)
     {
@@ -112,7 +161,7 @@ public:
         if (!group)
             return;
 
-        std::string names;
+        std::vector<std::string> names;
         for (GroupReference* itr = group->GetFirstMember(); itr; itr = itr->next())
         {
             Player* member = itr->GetSource();
@@ -125,20 +174,17 @@ public:
             if (!AbandonOnBot(member, questId))
                 continue;
 
-            if (!names.empty())
-                names += ", ";
-            names += member->GetName();
+            names.push_back(member->GetName());
         }
 
         if (names.empty())
             return;
 
-        Quest const* quest = sObjectMgr->GetQuestTemplate(questId);
-        std::string title = quest ? quest->GetTitle() : std::to_string(questId);
-        ChatHandler(player->GetSession()).PSendSysMessage("Group bots abandoned [{}]: {}", title, names);
+        std::string const message = FormatMessage(questId, names);
+        ChatHandler(player->GetSession()).SendSysMessage(message);
 
-        LOG_DEBUG("module", "[BotQuestAbandon] {} abandoned quest {}, bots followed: {}.",
-            player->GetName(), questId, names);
+        LOG_DEBUG("module", "[BotQuestAbandon] {} abandoned quest {}, {} bots followed.",
+            player->GetName(), questId, names.size());
     }
 };
 

@@ -19,8 +19,10 @@ to be dropped from every bot one by one.
   quest's source item, timers and the PvP flag are cleaned up exactly as for a
   player. If the core refuses because a source item cannot be taken back, that bot
   keeps the quest.
-- One system message names the bots that followed:
-  `Group bots abandoned [Quest]: Tank, Hunt`.
+- One system message counts and names the bots that followed, in the layout of the
+  mod-playerbots quest group messages: `Quest abandoned: [Quest] - Tank` for one bot,
+  `Quest abandoned: [Quest] - 4 bots: Heal, Hunt, Mage, Tank` for several. Beyond five
+  names the rest is only counted (`+3`), so a raid stays within one chat line.
 - Bots are recognised through `WorldSession::IsHeadless()`, without Playerbot headers.
   Selfbots count as real players. A quest a bot drops by itself is not passed on.
 - A bot on another map keeps the quest: the hook runs on the player's map thread,
