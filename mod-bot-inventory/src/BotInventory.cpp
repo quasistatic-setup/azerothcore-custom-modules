@@ -4,8 +4,9 @@
  * .botinv commands that let a player manage the bags, money and enchants of
  * the Playerbots in their party or raid without opening trade windows:
  *
- *   .botinv list                                  bags, equipment, money, talents, professions
- *   .botinv move <from> <to> <itemGuid>...        move whole stacks
+ *   .botinv list                                  bags, bank, equipment, money, talents, professions
+ *   .botinv move <from> <to> <itemGuid>...        move whole stacks into <to>'s bags
+ *   .botinv bank <from> <to> <itemGuid>...        move whole stacks into <to>'s bank
  *   .botinv gold <from> <to> <copper>             move money
  *   .botinv sell <owner> <itemGuid>...            sell stacks at the targeted vendor
  *   .botinv destroy <owner> <itemGuid>...         destroy stacks
@@ -26,6 +27,9 @@
  *
  * Transfers follow the trade window: Item::CanBeTraded, no quest-bound items,
  * CanStoreItem on the receiver, and both inventories saved in one transaction.
+ * Between a character's own bags and bank everything may move, as at a bank.
+ * Touching any bank needs a banker as the caller's target (configurable),
+ * like selling needs a vendor; whose bank it is does not matter.
  *
  * Selling pays the vendor price to the item's owner, as the vendor window
  * would; the caller must stand at a vendor and have it targeted, the bot may
@@ -75,16 +79,19 @@ namespace
 {
     std::atomic<bool> g_enabled{true};
     std::atomic<float> g_maxDistance{0.0f};
+    std::atomic<bool> g_bankNeedsBanker{true};
 
     // Addon messages are limited to 255 bytes; the core adds an 18 byte header.
     constexpr std::size_t MAX_LINE = 200;
 
+    // The item may go to another character.
     constexpr uint32 FLAG_MOVABLE = 0x1;
 
     void LoadConfig()
     {
         g_enabled.store(sConfigMgr->GetOption<bool>("BotInventory.Enable", true));
         g_maxDistance.store(sConfigMgr->GetOption<float>("BotInventory.MaxDistance", 0.0f));
+        g_bankNeedsBanker.store(sConfigMgr->GetOption<bool>("BotInventory.BankNeedsBanker", true));
 
         if (!g_enabled.load())
             LOG_INFO("module", "[BotInventory] Disabled.");
@@ -158,11 +165,26 @@ namespace
         return true;
     }
 
-    // Reason why an item cannot leave its owner's bags, or nullptr.
-    char const* MoveBlockReason(Item const* item)
+    // In a bank slot or in a bag in the bank; the bank bags themselves are not.
+    bool IsInBank(Item const* item)
     {
-        if (!Player::IsInventoryPos(item->GetPos()))
-            return "is not in a bag";
+        uint8 bag = item->GetBagSlot();
+        if (bag == INVENTORY_SLOT_BAG_0)
+            return item->GetSlot() >= BANK_SLOT_ITEM_START && item->GetSlot() < BANK_SLOT_ITEM_END;
+        return bag >= BANK_SLOT_BAG_START && bag < BANK_SLOT_BAG_END;
+    }
+
+    // Reason why an item cannot leave where it is, or nullptr.
+    char const* SourceBlockReason(Item const* item)
+    {
+        if (Player::IsInventoryPos(item->GetPos()) || IsInBank(item))
+            return nullptr;
+        return "is not in the bags or the bank";
+    }
+
+    // Reason why an item cannot go to another character, or nullptr.
+    char const* TradeBlockReason(Item const* item)
+    {
         if (item->GetTemplate()->Bonding == BIND_QUEST_ITEM || item->GetTemplate()->Class == ITEM_CLASS_QUEST)
             return "is a quest item";
         if (item->IsSoulBound())
@@ -170,6 +192,81 @@ namespace
         if (!item->CanBeTraded())
             return "cannot be traded";
         return nullptr;
+    }
+
+    // Reason why the caller cannot reach banks right now, or nullptr.
+    char const* BankBlockReason(Player* caller)
+    {
+        if (!g_bankNeedsBanker.load(std::memory_order_relaxed) ||
+            caller->GetNPCIfCanInteractWith(caller->GetTarget(), UNIT_NPC_FLAG_BANKER))
+            return nullptr;
+        return "Target a banker next to you first.";
+    }
+
+    // Player::MoveItemFromInventory, except that an item taken from the bank
+    // leaves the quest counters alone: it never counted for a quest there.
+    void TakeItem(Player* owner, Item* item)
+    {
+        uint8 bag = item->GetBagSlot();
+        uint8 slot = item->GetSlot();
+
+        if (!IsInBank(item))
+        {
+            owner->MoveItemFromInventory(bag, slot, true);
+            return;
+        }
+
+        owner->RemoveItem(bag, slot, true);
+        item->SetNotRefundable(owner, false);
+        item->RemoveFromUpdateQueueOf(owner);
+        if (item->IsInWorld())
+        {
+            item->RemoveFromWorld();
+            item->DestroyForPlayer(owner);
+        }
+
+        sScriptMgr->OnPlayerAfterMoveItemFromInventory(owner, item, bag, slot, true);
+    }
+
+    // Player::MoveItemToInventory, except that an item stored in the bank does
+    // not count for a quest.
+    void GiveItem(Player* receiver, Item* item, ItemPosCountVec const& dest, bool toBank)
+    {
+        if (!toBank)
+        {
+            receiver->MoveItemToInventory(dest, item, true, true);
+            return;
+        }
+
+        Item* stored = receiver->BankItem(dest, item, true);
+        if (stored == item)
+        {
+            if (stored->GetOwnerGUID() != receiver->GetGUID())
+                stored->SetOwnerGUID(receiver->GetGUID());
+            stored->SetState(ITEM_CHANGED, receiver);
+            if (stored->IsBOPTradable())
+                receiver->AddTradeableItem(stored);
+        }
+
+        sScriptMgr->OnPlayerAfterMoveItemToInventory(receiver, stored, true);
+    }
+
+    // Moves an item between bags and bank of one character the way the bank
+    // window does (WorldSession::HandleAutoStoreBankItemOpcode).
+    void MoveOwnItem(Player* owner, Item* item, ItemPosCountVec const& dest, bool toBank)
+    {
+        uint32 entry = item->GetEntry();
+        uint32 count = item->GetCount();
+
+        owner->RemoveItem(item->GetBagSlot(), item->GetSlot(), true);
+        if (toBank)
+        {
+            owner->ItemRemovedQuestCheck(entry, count);
+            owner->BankItem(dest, item, true);
+            owner->UpdateTitansGrip();
+        }
+        else if (Item const* stored = owner->StoreItem(dest, item, true))
+            owner->ItemAddedQuestCheck(stored->GetEntry(), stored->GetCount());
     }
 
     void SavePair(Player* a, Player* b)
@@ -232,7 +329,7 @@ namespace
 
     void AddItemRecord(LineWriter& writer, Item const* item)
     {
-        uint32 flags = MoveBlockReason(item) ? 0 : FLAG_MOVABLE;
+        uint32 flags = SourceBlockReason(item) || TradeBlockReason(item) ? 0 : FLAG_MOVABLE;
 
         writer.Add(Acore::StringFormat("{},{},{},{},{},{},{},{}",
             item->GetBagSlot(), item->GetSlot(), item->GetEntry(), item->GetCount(),
@@ -282,11 +379,25 @@ namespace
         }
     }
 
+    uint32 GetFreeBankSpace(Player const* player)
+    {
+        uint32 free = 0;
+        for (uint8 slot = BANK_SLOT_ITEM_START; slot < BANK_SLOT_ITEM_END; ++slot)
+            if (!player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+                ++free;
+
+        for (uint8 bagSlot = BANK_SLOT_BAG_START; bagSlot < BANK_SLOT_BAG_END; ++bagSlot)
+            if (Bag* bag = player->GetBagByPos(bagSlot))
+                free += bag->GetFreeSlots();
+
+        return free;
+    }
+
     void SendInventory(ChatHandler* handler, Player* caller, Player* player)
     {
-        handler->SendSysMessage(Acore::StringFormat("P~{}~{}~{}~{}~{}",
+        handler->SendSysMessage(Acore::StringFormat("P~{}~{}~{}~{}~{}~{}~{}",
             player->GetName(), player->getClass(), player->GetMoney(), player->GetFreeInventorySpace(),
-            player == caller ? 1 : 0));
+            player == caller ? 1 : 0, GetFreeBankSpace(player), player->GetBankBagSlotCount()));
 
         SendCharacterInfo(handler, player);
 
@@ -298,21 +409,45 @@ namespace
                         bag->GetEntry(), bag->GetGUID().GetCounter(), bag->GetBagSize(), bag->GetFreeSlots()));
         }
 
-        LineWriter writer(handler, "I~" + player->GetName() + "~");
+        {
+            LineWriter writer(handler, "I~" + player->GetName() + "~");
 
-        for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
+            for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
+                if (Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+                    AddItemRecord(writer, item);
+
+            for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+                if (Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
+                    AddItemRecord(writer, item);
+
+            for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+                if (Bag* bag = player->GetBagByPos(bagSlot))
+                    for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
+                        if (Item* item = bag->GetItemByPos(uint8(slot)))
+                            AddItemRecord(writer, item);
+        }
+
+        // The bank has its own lines, so an addon that does not know them
+        // never mistakes bank items for bag content.
+        {
+            LineWriter bankBags(handler, "H~" + player->GetName() + "~");
+            for (uint8 bagSlot = BANK_SLOT_BAG_START; bagSlot < BANK_SLOT_BAG_END; ++bagSlot)
+                if (Bag* bag = player->GetBagByPos(bagSlot))
+                    bankBags.Add(Acore::StringFormat("{},{},{},{},{}", bagSlot - BANK_SLOT_BAG_START,
+                        bag->GetEntry(), bag->GetGUID().GetCounter(), bag->GetBagSize(), bag->GetFreeSlots()));
+        }
+
+        LineWriter bank(handler, "J~" + player->GetName() + "~");
+
+        for (uint8 slot = BANK_SLOT_ITEM_START; slot < BANK_SLOT_ITEM_END; ++slot)
             if (Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
-                AddItemRecord(writer, item);
+                AddItemRecord(bank, item);
 
-        for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
-            if (Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot))
-                AddItemRecord(writer, item);
-
-        for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+        for (uint8 bagSlot = BANK_SLOT_BAG_START; bagSlot < BANK_SLOT_BAG_END; ++bagSlot)
             if (Bag* bag = player->GetBagByPos(bagSlot))
                 for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
                     if (Item* item = bag->GetItemByPos(uint8(slot)))
-                        AddItemRecord(writer, item);
+                        AddItemRecord(bank, item);
     }
 
     struct EnchantSpell
@@ -491,6 +626,7 @@ public:
         {
             { "list",     HandleListCommand,     SEC_PLAYER, Console::No },
             { "move",     HandleMoveCommand,     SEC_PLAYER, Console::No },
+            { "bank",     HandleBankCommand,     SEC_PLAYER, Console::No },
             { "gold",     HandleGoldCommand,     SEC_PLAYER, Console::No },
             { "sell",     HandleSellCommand,     SEC_PLAYER, Console::No },
             { "destroy",  HandleDestroyCommand,  SEC_PLAYER, Console::No },
@@ -541,6 +677,19 @@ public:
 
     static bool HandleMoveCommand(ChatHandler* handler, std::string fromName, std::string toName, Tail guids)
     {
+        return MoveItems(handler, fromName, toName, guids, false);
+    }
+
+    static bool HandleBankCommand(ChatHandler* handler, std::string fromName, std::string toName, Tail guids)
+    {
+        return MoveItems(handler, fromName, toName, guids, true);
+    }
+
+    // Moves stacks from the bags or bank of `from` into the bags or, with
+    // `toBank`, the bank of `to`. `from` and `to` may be the same character.
+    static bool MoveItems(ChatHandler* handler, std::string const& fromName, std::string const& toName,
+        std::string_view guids, bool toBank)
+    {
         Player* caller = GetCaller(handler);
         if (!caller)
             return false;
@@ -550,11 +699,12 @@ public:
         if (!from || !to)
             return false;
 
-        if (from == to)
-            return Fail(handler, "Source and target are the same character.");
-
         if (!CheckPair(handler, from, to))
             return false;
+
+        char const* bankBlock = BankBlockReason(caller);
+        if (toBank && bankBlock)
+            return Fail(handler, bankBlock);
 
         std::vector<std::string_view> tokens = Acore::Tokenize(guids, ' ', false);
         if (tokens.empty())
@@ -575,29 +725,58 @@ public:
                 continue;
             }
 
-            if (char const* reason = MoveBlockReason(item))
+            if (char const* reason = SourceBlockReason(item))
             {
                 report(reason);
                 continue;
             }
 
-            ItemPosCountVec dest;
-            if (to->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+            bool fromBank = IsInBank(item);
+            if (fromBank && bankBlock)
             {
-                report("receiver has no room or may not carry it");
+                report("is in the bank; target a banker first");
+                continue;
+            }
+
+            if (from == to && fromBank == toBank)
+            {
+                report(toBank ? "is already in the bank" : "is already in the bags");
+                continue;
+            }
+
+            if (from != to)
+                if (char const* reason = TradeBlockReason(item))
+                {
+                    report(reason);
+                    continue;
+                }
+
+            ItemPosCountVec dest;
+            InventoryResult result = toBank
+                ? to->CanBankItem(NULL_BAG, NULL_SLOT, dest, item, false)
+                : to->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
+            if (result != EQUIP_ERR_OK)
+            {
+                report(toBank ? "no room in the bank or may not go there" : "receiver has no room or may not carry it");
                 continue;
             }
 
             uint32 entry = item->GetEntry();
             uint32 count = item->GetCount();
 
-            from->MoveItemFromInventory(item->GetBagSlot(), item->GetSlot(), true);
-            to->MoveItemToInventory(dest, item, true, true);
+            if (from == to)
+                MoveOwnItem(from, item, dest, toBank);
+            else
+            {
+                TakeItem(from, item);
+                GiveItem(to, item, dest, toBank);
+            }
             ++moved;
 
             handler->SendSysMessage(Acore::StringFormat("M~{}~1~", token));
-            LOG_INFO("module", "[BotInventory] {}: moved {}x item {} from {} to {}.",
-                caller->GetName(), count, entry, from->GetName(), to->GetName());
+            LOG_INFO("module", "[BotInventory] {}: moved {}x item {} from {}'s {} to {}'s {}.",
+                caller->GetName(), count, entry, from->GetName(), fromBank ? "bank" : "bags",
+                to->GetName(), toBank ? "bank" : "bags");
         }
 
         if (moved)
@@ -607,10 +786,12 @@ public:
     }
 
     // Shared frame of sell and destroy: resolves the owner and walks the
-    // guids. `act` handles one bag item and returns the reason it refused,
-    // or nullptr when the item is gone.
+    // guids. `act` handles one item in the bags, or with `allowBank` also in
+    // the bank, and returns the reason it refused, or nullptr when the item
+    // is gone.
     template <typename Action>
-    static bool ForEachBagItem(ChatHandler* handler, std::string const& ownerName, std::string_view guids, Action&& act)
+    static bool ForEachItem(ChatHandler* handler, std::string const& ownerName, std::string_view guids,
+        bool allowBank, Action&& act)
     {
         Player* caller = GetCaller(handler);
         if (!caller)
@@ -627,6 +808,8 @@ public:
         if (tokens.empty())
             return Fail(handler, "No item given.");
 
+        char const* bankBlock = allowBank ? BankBlockReason(caller) : nullptr;
+
         uint32 done = 0;
         for (std::string_view token : tokens)
         {
@@ -634,7 +817,11 @@ public:
             char const* reason = nullptr;
             if (!item)
                 reason = "not found";
-            else if (!Player::IsInventoryPos(item->GetPos()))
+            else if (IsInBank(item) && !allowBank)
+                reason = "is in the bank";
+            else if (IsInBank(item) && bankBlock)
+                reason = "is in the bank; target a banker first";
+            else if (!IsInBank(item) && !Player::IsInventoryPos(item->GetPos()))
                 reason = "is not in a bag";
             else if (item->IsNotEmptyBag())
                 reason = "is a bag with content";
@@ -665,7 +852,7 @@ public:
             return Fail(handler, "Target a vendor next to you first.");
 
         uint32 total = 0;
-        bool result = ForEachBagItem(handler, ownerName, guids, [&](Player* who, Player* owner, Item* item) -> char const*
+        bool result = ForEachItem(handler, ownerName, guids, false, [&](Player* who, Player* owner, Item* item) -> char const*
         {
             ItemTemplate const* proto = item->GetTemplate();
             if (!proto->SellPrice)
@@ -694,7 +881,7 @@ public:
 
     static bool HandleDestroyCommand(ChatHandler* handler, std::string ownerName, Tail guids)
     {
-        return ForEachBagItem(handler, ownerName, guids, [](Player* who, Player* owner, Item* item) -> char const*
+        return ForEachItem(handler, ownerName, guids, true, [](Player* who, Player* owner, Item* item) -> char const*
         {
             uint32 entry = item->GetEntry();
             uint32 count = item->GetCount();

@@ -2,9 +2,9 @@
 
 mod-bot-inventory is an AzerothCore WotLK module for managing the inventories of the
 Playerbots in your party or raid without trade windows. Its `.botinv` commands list
-the bags, equipment and money of you and your bots, move items and gold directly
-between them, sell or destroy their items, and apply profession enchants to any of
-their items. It is a plain
+the bags, banks, equipment and money of you and your bots, move items and gold
+directly between them and into or out of any of their banks, sell or destroy their
+items, and apply profession enchants to any of their items. It is a plain
 `CommandScript`, without a core patch and without Playerbot headers.
 
 ## Why
@@ -22,11 +22,12 @@ names are your own character and bots in your group.
 
 | Command | Effect |
 |---|---|
-| `.botinv list` | Bags, equipment, money, free slots, level, talent points and professions of you and every bot in your group |
-| `.botinv move <from> <to> <itemGuid> [<itemGuid> ...]` | Moves whole stacks from one character's bags to another's |
+| `.botinv list` | Bags, bank, equipment, money, free slots, level, talent points and professions of you and every bot in your group |
+| `.botinv move <from> <to> <itemGuid> [<itemGuid> ...]` | Moves whole stacks from one character's bags or bank into another's bags, or from a character's bank into their own bags |
+| `.botinv bank <from> <to> <itemGuid> [<itemGuid> ...]` | Moves whole stacks from one character's bags or bank into another's bank, or from a character's bags into their own bank |
 | `.botinv gold <from> <to> <copper>` | Moves money |
 | `.botinv sell <owner> <itemGuid> [<itemGuid> ...]` | Sells whole stacks from that character's bags at the vendor you have targeted; the owner gets the money |
-| `.botinv destroy <owner> <itemGuid> [<itemGuid> ...]` | Destroys whole stacks in that character's bags |
+| `.botinv destroy <owner> <itemGuid> [<itemGuid> ...]` | Destroys whole stacks in that character's bags or bank |
 | `.botinv equipbag <owner> <itemGuid> <slot>` | Puts a bag from that character's bags into bag slot 0 to 3; the content of the bag it replaces moves over |
 | `.botinv enchants <owner> <itemGuid>` | Lists, per group member, the enchants they know that fit this item |
 | `.botinv enchant <caster> <spellId> <owner> <itemGuid>` | Applies that enchant |
@@ -39,10 +40,17 @@ names are your own character and bots in your group.
   `WorldSession::IsHeadless()`; other real players are never a source or a target.
   Every real player in a group can manage every bot in that group.
 - Nobody involved may be in combat, loading or in an open trade.
-- Items move under the rules of the trade window: no soulbound items, no quest
-  items, no bags with content, only from bags (not from equipment or bank), and the
-  receiver must have room and be allowed to carry the item. Both inventories are
-  saved in one database transaction.
+- Items move between characters under the rules of the trade window: no soulbound
+  items, no quest items, no bags with content, only from bags or bank (not from
+  equipment), and the receiver must have room and be allowed to carry the item.
+  Between a character's own bags and bank everything moves that a bank window
+  would take, soulbound and quest items included. Both inventories are saved in
+  one database transaction.
+- Moving into or out of a bank needs a banker in interaction range as your target
+  (`BotInventory.BankNeedsBanker`); whose bank it is does not matter, so a bot's bank
+  works from any banker. The bank is listed without one. Items in the bank cannot be
+  sold; destroying them follows the banker rule. Bank bags and bank bag slots are
+  shown but not changed.
 - Selling needs a vendor in interaction range as your target; the bot whose item is
   sold can be anywhere. The owner receives the vendor price. There is no buyback.
 - Destroying has no confirmation and cannot be undone; an addon should ask first.
@@ -66,11 +74,13 @@ Long lists are split over several lines with the same head.
 
 | Line | Meaning |
 |---|---|
-| `P~<name>~<classId>~<copper>~<freeSlots>~<isCaller>` | One character, followed by its item lines |
+| `P~<name>~<classId>~<copper>~<freeSlots>~<isCaller>~<freeBankSlots>~<bankBagSlots>` | One character, followed by its item lines; `bankBagSlots` is the number of purchased bank bag slots |
 | `S~<name>~<level>~<points1>~<points2>~<points3>` | Level and talent points per tree of the active spec |
 | `K~<name>~<primary 1 or 0>,<value>,<max>,<skillName>;...` | Professions, named in the caller's language |
 | `G~<name>~<bagSlot>,<entry>,<itemGuid>,<size>,<freeSlots>;...` | Equipped bags in bag slots 0 to 3; empty slots are left out |
-| `I~<name>~<bag>,<slot>,<entry>,<count>,<itemGuid>,<enchantId>,<randomPropertyId>,<flags>;...` | Items; bag 255 with slot 0 to 18 is equipment; flag 1 means the item can be moved |
+| `I~<name>~<bag>,<slot>,<entry>,<count>,<itemGuid>,<enchantId>,<randomPropertyId>,<flags>;...` | Items; bag 255 with slot 0 to 18 is equipment; flag 1 means the item can go to another character |
+| `H~<name>~<bankBagSlot>,<entry>,<itemGuid>,<size>,<freeSlots>;...` | Bags in bank bag slots 0 to 6; empty slots are left out |
+| `J~<name>~<item records as in I>` | Items in the bank and in its bags |
 | `M~<itemGuid>~<1 or 0>~<reason>` | Result of one item of a move, sale or destroy |
 | `T~<copper>` | Total a sale paid |
 | `G~<from>~<to>~<copper>` | Money was moved (reply to `.botinv gold`) |
@@ -103,8 +113,9 @@ for every output line, then `o0001` (done) or `f0001` (failed). This needs
 |---|---|---|
 | `BotInventory.Enable` | `1` | Turn the commands on or off |
 | `BotInventory.MaxDistance` | `0` | Largest distance in yards between the two characters of a transfer or enchant; `0` means no limit |
+| `BotInventory.BankNeedsBanker` | `1` | Moving into or out of a bank needs a banker as your target; `0` reaches every bank from anywhere |
 
-`.reload config` applies both settings.
+`.reload config` applies all settings.
 
 ## Installation
 

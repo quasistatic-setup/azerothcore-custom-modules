@@ -4,8 +4,9 @@
 # mod-bot-inventory
 #
 # .botinv commands for a player and the Playerbots in the same party or raid:
-# list all bags and equipment, move items and money directly between them
-# without a trade window, and apply profession enchants to any of their items.
+# list all bags, banks and equipment, move items and money directly between
+# them without a trade window, and apply profession enchants to any of their
+# items.
 #
 # Real players other than the caller are never touched. Soulbound and quest
 # items stay where they are, nobody may be in combat or in a trade, and
@@ -30,3 +31,15 @@ BotInventory.Enable = 1
 #
 
 BotInventory.MaxDistance = 0
+
+#
+#    BotInventory.BankNeedsBanker
+#        Description: Moving items into or out of a bank needs a banker in
+#                     interaction range as your target, like selling needs a
+#                     vendor. Whose bank it is does not matter, so a bot's bank
+#                     works from any banker. The bank content is always listed.
+#                     0 lets the commands reach every bank from anywhere.
+#        Default:     1
+#
+
+BotInventory.BankNeedsBanker = 1
