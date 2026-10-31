@@ -29,6 +29,7 @@
 #include "MapMgr.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "RespawnFreezePolicy.h"
 #include "ScriptMgr.h"
 #include "StringFormat.h"
 #include "WorldSession.h"
@@ -105,14 +106,12 @@ namespace
     // Long respawns keep following real time. A rare spawn with 42 hours would
     // otherwise turn calendar time into play time and stay away for weeks with
     // a few hours of play per day. The same applies to event NPCs whose event
-    // follows the calendar anyway.
-    bool IsLongRunner(uint32 guid)
+    // follows the calendar anyway. Dungeon and raid respawns are exempt from
+    // this limit: even ordinary dungeon trash often takes hours to respawn.
+    bool IsLongRunner(uint32 guid, uint32 instanceId)
     {
-        if (!g_cfg.maxSpawnTimeSecs)
-            return false;
-
         CreatureData const* data = sObjectMgr->GetCreatureData(guid);
-        return data && data->spawntimesecs > g_cfg.maxSpawnTimeSecs;
+        return data && OfflineRespawnFreeze::IsLongRunner(instanceId, data->spawntimesecs, g_cfg.maxSpawnTimeSecs);
     }
 
     // Result of one pass, used only for the log line.
@@ -155,7 +154,7 @@ namespace
             uint32 const instanceId = f[1].Get<uint32>();
             uint32 const oldTime    = f[3].Get<uint32>();
 
-            if (IsLongRunner(guid))
+            if (IsLongRunner(guid, instanceId))
             {
                 ++res.skippedLong;
                 continue;
@@ -634,12 +633,12 @@ private:
         std::vector<ParkedEntry> parked;
         std::set<std::pair<uint32, uint32>> loaded;
 
-        auto isOpen = [&](uint32 guid, time_t respawnTime)
+        auto isOpen = [&](uint32 guid, uint32 instanceId, time_t respawnTime)
         {
             if (respawnTime <= static_cast<time_t>(now) || respawnTime >= static_cast<time_t>(upperBound))
                 return false;
 
-            if (IsLongRunner(guid))
+            if (IsLongRunner(guid, instanceId))
             {
                 ++res.skippedLong;
                 return false;
@@ -654,7 +653,7 @@ private:
 
             std::map<uint32, time_t> open;
             for (auto const& [guid, respawnTime] : map->GetCreatureRespawnTimes())
-                if (isOpen(guid, respawnTime))
+                if (isOpen(guid, map->GetInstanceId(), respawnTime))
                     open.emplace(guid, respawnTime);
 
             for (auto const& [guid, creature] : map->GetCreatureBySpawnIdStore())
@@ -666,7 +665,7 @@ private:
                 if (!data || !data->dbData)
                     continue;
 
-                if (isOpen(guid, creature->GetRespawnTime()))
+                if (isOpen(guid, map->GetInstanceId(), creature->GetRespawnTime()))
                     open.emplace(guid, creature->GetRespawnTime());
             }
 
@@ -704,7 +703,7 @@ private:
                 uint32 const mapId       = f[2].Get<uint32>();
                 uint32 const respawnTime = f[3].Get<uint32>();
 
-                if (loaded.count({ mapId, instanceId }) || !isOpen(guid, respawnTime))
+                if (loaded.count({ mapId, instanceId }) || !isOpen(guid, instanceId, respawnTime))
                     continue;
 
                 trans->Append("UPDATE creature_respawn SET respawnTime = {} WHERE guid = {} AND instanceId = {} AND respawnTime = {}",

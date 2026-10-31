@@ -128,12 +128,13 @@ automatically by the AzerothCore database updater on the next start.
 
 ## Tests
 
-Modules with pure calculation logic ship a standalone test that needs neither a
-server nor the core sources:
+Modules with pure calculation or selection logic ship a standalone test that
+needs neither a server nor the core sources:
 
 ```bash
 mod-quest-drop-rate/tests/run_logic_test.sh
 mod-out-of-combat-mana/tests/run_logic_test.sh
+mod-offline-respawn-freeze/tests/run_logic_test.sh
 ```
 
 ## Support

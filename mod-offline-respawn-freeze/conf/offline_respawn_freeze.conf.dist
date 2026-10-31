@@ -128,9 +128,11 @@ OfflineRespawnFreeze.MaxFutureDays = 30
 
 #
 #    OfflineRespawnFreeze.MaxSpawnTimeSecs
-#        Description: Spawns whose own respawn time (creature.spawntimesecs)
-#                     exceeds this value are not shifted; they keep following
-#                     real time.
+#        Description: Open-world spawns whose own respawn time
+#                     (creature.spawntimesecs) exceeds this value are not
+#                     shifted; they keep following real time.
+#                     Dungeon and raid spawns are exempt from this limit;
+#                     IncludeInstances controls whether they are shifted.
 #                     Background: the freeze turns calendar time into play
 #                     time. For ordinary creatures this is not noticeable,
 #                     their respawn time is mostly below five minutes. For
@@ -147,10 +149,10 @@ OfflineRespawnFreeze.MaxSpawnTimeSecs = 1800
 #
 #    OfflineRespawnFreeze.IncludeInstances
 #        Description: Also shift respawn times inside instances.
-#                     Note: ordinary instances without a bind lose their
-#                     respawn entries anyway as soon as the last player
-#                     leaves. The setting therefore matters for heroic
-#                     dungeons and raids, where a bind exists.
+#                     Applies to normal and heroic dungeons and raids while
+#                     the instance save exists. A reset or an expired bind
+#                     deletes the respawn entries; the freeze cannot restore
+#                     them. MaxSpawnTimeSecs only limits open-world spawns.
 #                     Instance binds themselves are not shifted; they expire
 #                     by real calendar time.
 #        Default:     1

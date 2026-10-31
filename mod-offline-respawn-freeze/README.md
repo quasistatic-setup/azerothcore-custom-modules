@@ -49,7 +49,8 @@ are untouched as well. No virtual clock is introduced.
 Instance binds (`instance.resettime`) are deliberately not moved. They expire by
 real calendar time so weekly resets stay in sync with the real week.
 
-Long respawns are excluded as well, see `MaxSpawnTimeSecs`.
+Long open-world respawns are excluded as well, see `MaxSpawnTimeSecs`.
+Dungeon and raid spawns are exempt from this limit when `IncludeInstances = 1`.
 
 ## How it works
 
@@ -117,8 +118,14 @@ minutes or less, so they are back shortly after login anyway.
 For rare elite spawns the effect reverses. Grunter with 42 hours or Kurmokk with 35
 hours would not return after two days with two hours of play per evening, but after
 weeks. The same applies to event NPCs whose event follows the real calendar.
-`MaxSpawnTimeSecs` excludes such spawns from the shift; with the default of 1800
-seconds this affected 11 of the 889 entries in the same sample.
+`MaxSpawnTimeSecs` excludes such open-world spawns from the shift; with the default
+of 1800 seconds this affected 11 of the 889 entries in the same sample.
+
+This limit does not apply inside instances. Ordinary dungeon mobs can have respawn
+times of several hours, so excluding them would refill the dungeon during an
+absence. `IncludeInstances` controls normal and heroic dungeons and raids. A reset
+or an expired instance save still removes the respawns; the freeze does not
+prevent instance resets or recover deleted entries.
 
 ## Configuration
 
@@ -134,8 +141,14 @@ seconds this affected 11 of the 889 entries in the same sample.
 | `OfflineRespawnFreeze.MinDowntimeSeconds` | `60` | Below this downtime nothing is shifted at startup |
 | `OfflineRespawnFreeze.MaxDowntimeDays` | `60` | Above this downtime only log, do not change anything |
 | `OfflineRespawnFreeze.MaxFutureDays` | `30` | Respawn times further in the future stay untouched |
-| `OfflineRespawnFreeze.MaxSpawnTimeSecs` | `1800` | Spawns with a longer own respawn time follow real time; `0` shifts everything |
+| `OfflineRespawnFreeze.MaxSpawnTimeSecs` | `1800` | Open-world spawns with a longer own respawn time follow real time; instances are exempt; `0` disables the limit |
 | `OfflineRespawnFreeze.IncludeInstances` | `1` | Also shift respawn times inside instances |
+
+## Tests
+
+Run `tests/run_logic_test.sh` to check the production selection policy without a
+server or database. It covers long dungeon respawns, outdoor rare and event
+spawns, configured boundaries and a disabled limit.
 
 ## Own tables
 
