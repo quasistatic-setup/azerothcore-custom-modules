@@ -240,6 +240,27 @@ namespace
         return nullptr;
     }
 
+    // CanStoreItem and CanBankItem refuse a soulbound item that belongs to
+    // somebody else. When soulbound moves are allowed the item is about to
+    // belong to the receiver, so it is asked as if it already did.
+    InventoryResult CanReceive(Player* receiver, Item* item, ItemPosCountVec& dest, bool toBank)
+    {
+        ObjectGuid previous = item->GetOwnerGUID();
+        bool swap = previous != receiver->GetGUID() && item->IsSoulBound() &&
+            g_allowSoulbound.load(std::memory_order_relaxed);
+        if (swap)
+            item->SetOwnerGUID(receiver->GetGUID());
+
+        InventoryResult result = toBank
+            ? receiver->CanBankItem(NULL_BAG, NULL_SLOT, dest, item, false)
+            : receiver->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
+
+        if (swap)
+            item->SetOwnerGUID(previous);
+
+        return result;
+    }
+
     // Reason why the caller cannot reach banks right now, or nullptr.
     char const* BankBlockReason(Player* caller)
     {
@@ -800,9 +821,7 @@ public:
                 }
 
             ItemPosCountVec dest;
-            InventoryResult result = toBank
-                ? to->CanBankItem(NULL_BAG, NULL_SLOT, dest, item, false)
-                : to->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
+            InventoryResult result = CanReceive(to, item, dest, toBank);
             if (result != EQUIP_ERR_OK)
             {
                 report(toBank ? "no room in the bank or may not go there" : "receiver has no room or may not carry it");
@@ -1099,7 +1118,7 @@ public:
                 return Fail(handler, target->GetName() + " cannot wear it right now.");
 
             ItemPosCountVec dest;
-            if (target->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+            if (CanReceive(target, item, dest, false) != EQUIP_ERR_OK)
                 return Fail(handler, target->GetName() + " has no room for it.");
 
             TakeItem(owner, item);
