@@ -29,6 +29,8 @@ names are your own character and bots in your group.
 | `.botinv sell <owner> <itemGuid> [<itemGuid> ...]` | Sells whole stacks from that character's bags at the vendor you have targeted; the owner gets the money |
 | `.botinv destroy <owner> <itemGuid> [<itemGuid> ...]` | Destroys whole stacks in that character's bags or bank |
 | `.botinv equipbag <owner> <itemGuid> <slot>` | Puts a bag from that character's bags into bag slot 0 to 3; the content of the bag it replaces moves over |
+| `.botinv equips <owner> <itemGuid>` | Lists, per group member, whether they may wear an item from the bags and why not |
+| `.botinv equip <target> <owner> <itemGuid>` | Moves the item to `<target>`'s bags if it is not theirs, then wears it; a worn piece in that slot goes to the bags |
 | `.botinv enchants <owner> <itemGuid>` | Lists, per group member, the enchants they know that fit this item |
 | `.botinv enchant <caster> <spellId> <owner> <itemGuid>` | Applies that enchant |
 
@@ -41,7 +43,8 @@ names are your own character and bots in your group.
   Every real player in a group can manage every bot in that group.
 - Nobody involved may be in combat, loading or in an open trade.
 - Items move between characters under the rules of the trade window: no soulbound
-  items, no quest items, no bags with content, only from bags or bank (not from
+  items (unless `BotInventory.AllowSoulbound = 1`), no quest items, no bags with
+  content, only from bags or bank (not from
   equipment), and the receiver must have room and be allowed to carry the item.
   Between a character's own bags and bank everything moves that a bank window
   would take, soulbound and quest items included. Both inventories are saved in

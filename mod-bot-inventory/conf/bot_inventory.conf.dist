@@ -8,9 +8,11 @@
 # them without a trade window, and apply profession enchants to any of their
 # items.
 #
-# Real players other than the caller are never touched. Soulbound and quest
-# items stay where they are, nobody may be in combat or in a trade, and
-# enchants cost the enchanter's reagents as usual.
+# Real players other than the caller are never touched. Quest items stay
+# where they are, soulbound ones too unless allowed below. Nobody may be in
+# combat or in a trade, and
+# enchants cost the enchanter's reagents as usual. BotInventory.AllowSoulbound
+# lets soulbound items change hands between them.
 ########################################
 
 #
@@ -43,3 +45,15 @@ BotInventory.MaxDistance = 0
 #
 
 BotInventory.BankNeedsBanker = 1
+
+#
+#    BotInventory.AllowSoulbound
+#        Description: Soulbound items may move between you and your bots,
+#                     into their bags and banks and onto their equipment, as
+#                     if every item were bound to the whole group. Quest
+#                     items stay where they are.
+#                     0 keeps them with the character they are bound to.
+#        Default:     0
+#
+
+BotInventory.AllowSoulbound = 0

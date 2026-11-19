@@ -11,6 +11,8 @@
  *   .botinv sell <owner> <itemGuid>...            sell stacks at the targeted vendor
  *   .botinv destroy <owner> <itemGuid>...         destroy stacks
  *   .botinv equipbag <owner> <itemGuid> <slot>    put a bag from the bags into bag slot 0..3
+ *   .botinv equips <owner> <itemGuid>             who may wear an item from the bags, and why not
+ *   .botinv equip <target> <owner> <itemGuid>     move it to <target> if needed and wear it
  *   .botinv enchants <owner> <itemGuid>           enchants available for an item
  *   .botinv enchant <caster> <spell> <owner> <itemGuid>
  *
@@ -34,6 +36,10 @@
  * Selling pays the vendor price to the item's owner, as the vendor window
  * would; the caller must stand at a vendor and have it targeted, the bot may
  * be anywhere. There is no buyback.
+ *
+ * Wearing an item goes through Player::SwapItem as well. Whether a character may
+ * wear it is judged on the item template (class, race, level, skill, proficiency),
+ * so the answer also covers soulbound items the character does not own yet.
  *
  * Equipping a bag goes through Player::SwapItem, the function behind a drag
  * in the client. It already moves the content of the bag being replaced into
@@ -80,6 +86,7 @@ namespace
     std::atomic<bool> g_enabled{true};
     std::atomic<float> g_maxDistance{0.0f};
     std::atomic<bool> g_bankNeedsBanker{true};
+    std::atomic<bool> g_allowSoulbound{false};
 
     // Addon messages are limited to 255 bytes; the core adds an 18 byte header.
     constexpr std::size_t MAX_LINE = 200;
@@ -92,6 +99,8 @@ namespace
         g_enabled.store(sConfigMgr->GetOption<bool>("BotInventory.Enable", true));
         g_maxDistance.store(sConfigMgr->GetOption<float>("BotInventory.MaxDistance", 0.0f));
         g_bankNeedsBanker.store(sConfigMgr->GetOption<bool>("BotInventory.BankNeedsBanker", true));
+
+        g_allowSoulbound.store(sConfigMgr->GetOption<bool>("BotInventory.AllowSoulbound", false));
 
         if (!g_enabled.load())
             LOG_INFO("module", "[BotInventory] Disabled.");
@@ -187,10 +196,47 @@ namespace
     {
         if (item->GetTemplate()->Bonding == BIND_QUEST_ITEM || item->GetTemplate()->Class == ITEM_CLASS_QUEST)
             return "is a quest item";
-        if (item->IsSoulBound())
+        if (item->IsSoulBound() && !g_allowSoulbound.load(std::memory_order_relaxed))
             return "is soulbound";
-        if (!item->CanBeTraded())
+        if (!item->IsSoulBound() && !item->CanBeTraded())
             return "cannot be traded";
+        if (item->IsSoulBound() && item->IsNotEmptyBag())
+            return "is a bag with content";
+        return nullptr;
+    }
+
+    // Reason why a character may not wear an item, or nullptr. Judged on the
+    // template so that a soulbound item of somebody else can be asked about.
+    char const* WearBlockReason(Player const* target, Item const* item)
+    {
+        ItemTemplate const* proto = item->GetTemplate();
+        switch (proto->InventoryType)
+        {
+            case INVTYPE_NON_EQUIP:
+            case INVTYPE_BAG:
+            case INVTYPE_QUIVER:
+                return "cannot be worn";
+            default:
+                break;
+        }
+
+        switch (target->CanUseItem(proto))
+        {
+            case EQUIP_ERR_OK:
+                break;
+            case EQUIP_ERR_CANT_EQUIP_LEVEL_I:
+                return "level too low";
+            case EQUIP_ERR_NO_REQUIRED_PROFICIENCY:
+            case EQUIP_ERR_CANT_EQUIP_SKILL:
+                return "lacks the proficiency";
+            default:
+                return "may not use it";
+        }
+
+        if (uint32 skill = proto->GetSkill())
+            if (!target->GetSkillValue(skill))
+                return "lacks the proficiency";
+
         return nullptr;
     }
 
@@ -631,6 +677,8 @@ public:
             { "sell",     HandleSellCommand,     SEC_PLAYER, Console::No },
             { "destroy",  HandleDestroyCommand,  SEC_PLAYER, Console::No },
             { "equipbag", HandleEquipBagCommand, SEC_PLAYER, Console::No },
+            { "equips",   HandleEquipsCommand,   SEC_PLAYER, Console::No },
+            { "equip",    HandleEquipCommand,    SEC_PLAYER, Console::No },
             { "enchants", HandleEnchantsCommand, SEC_PLAYER, Console::No },
             { "enchant",  HandleEnchantCommand,  SEC_PLAYER, Console::No }
         };
@@ -973,6 +1021,117 @@ public:
         handler->SendSysMessage(Acore::StringFormat("G~{}~{}~{}", from->GetName(), to->GetName(), copper));
         LOG_INFO("module", "[BotInventory] {}: moved {} copper from {} to {}.",
             caller->GetName(), copper, from->GetName(), to->GetName());
+
+        return true;
+    }
+
+    // One line per group member: Q~<name>~<1 may wear it, 0 may not>~<reason>.
+    static bool HandleEquipsCommand(ChatHandler* handler, std::string ownerName, std::string guid)
+    {
+        Player* caller = GetCaller(handler);
+        if (!caller)
+            return false;
+
+        Player* owner = GetParticipant(handler, caller, ownerName);
+        if (!owner)
+            return false;
+
+        Item* item = FindItem(owner, guid);
+        if (!item)
+            return Fail(handler, "Item not found.");
+
+        if (!Player::IsInventoryPos(item->GetPos()))
+            return Fail(handler, "Only items in the bags can be worn from here.");
+
+        for (Player* target : GetParticipants(caller))
+        {
+            char const* reason = WearBlockReason(target, item);
+            if (!reason && target != owner)
+                reason = TradeBlockReason(item);
+            if (!reason && !target->IsAlive())
+                reason = "is dead";
+
+            handler->SendSysMessage(Acore::StringFormat("Q~{}~{}~{}",
+                target->GetName(), reason ? 0 : 1, reason ? reason : ""));
+        }
+
+        return true;
+    }
+
+    static bool HandleEquipCommand(ChatHandler* handler, std::string targetName, std::string ownerName, std::string guid)
+    {
+        Player* caller = GetCaller(handler);
+        if (!caller)
+            return false;
+
+        Player* target = GetParticipant(handler, caller, targetName);
+        Player* owner = target ? GetParticipant(handler, caller, ownerName) : nullptr;
+        if (!target || !owner)
+            return false;
+
+        if (!CheckPair(handler, owner, target))
+            return false;
+
+        Item* item = FindItem(owner, guid);
+        if (!item)
+            return Fail(handler, "Item not found.");
+
+        if (!Player::IsInventoryPos(item->GetPos()))
+            return Fail(handler, "The item is not in the bags.");
+
+        if (!target->IsAlive())
+            return Fail(handler, target->GetName() + " is dead.");
+
+        if (char const* reason = WearBlockReason(target, item))
+            return Fail(handler, target->GetName() + " cannot wear it: " + reason + ".");
+
+        uint32 entry = item->GetEntry();
+        ObjectGuid itemGuid = item->GetGUID();
+
+        if (owner != target)
+        {
+            if (char const* reason = TradeBlockReason(item))
+                return Fail(handler, std::string("The item ") + reason + ".");
+
+            // Soulbound ones cannot be asked of the receiver before they belong to it.
+            uint16 slotPos = 0;
+            if (!item->IsSoulBound() && target->CanEquipItem(NULL_SLOT, slotPos, item, true) != EQUIP_ERR_OK)
+                return Fail(handler, target->GetName() + " cannot wear it right now.");
+
+            ItemPosCountVec dest;
+            if (target->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+                return Fail(handler, target->GetName() + " has no room for it.");
+
+            TakeItem(owner, item);
+            GiveItem(target, item, dest, false);
+            item = target->GetItemByGuid(itemGuid);
+            if (!item)
+            {
+                SavePair(owner, target);
+                return Fail(handler, "The item could not be handed over.");
+            }
+        }
+
+        uint16 slotPos = 0;
+        InventoryResult result = target->CanEquipItem(NULL_SLOT, slotPos, item, true);
+        if (result == EQUIP_ERR_OK)
+        {
+            target->SwapItem(item->GetPos(), slotPos);
+            item = target->GetItemByGuid(itemGuid);
+            if (!item || item->GetBagSlot() != INVENTORY_SLOT_BAG_0 || item->GetSlot() >= EQUIPMENT_SLOT_END)
+                result = EQUIP_ERR_CANT_DO_RIGHT_NOW;
+        }
+
+        SavePair(owner, target);
+
+        if (result != EQUIP_ERR_OK)
+            return Fail(handler, owner != target
+                ? target->GetName() + " received the item but could not wear it."
+                : target->GetName() + " cannot wear it right now.");
+
+        handler->SendSysMessage(Acore::StringFormat("W~{}~{}", target->GetName(), itemGuid.GetCounter()));
+        LOG_INFO("module", "[BotInventory] {}: {} wears item {} of {}.",
+            caller->GetName(), target->GetName(), entry, owner->GetName());
 
         return true;
     }
